@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>甄采体制 · 中国三千年制度变迁史 · 史诗编年影片</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
+canvas{display:block;width:min(100vw,calc(100vh * 2560 / 1090));height:auto;aspect-ratio:2560/1090;background:#000}
+#gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;
+  background:radial-gradient(ellipse at center,rgba(20,8,4,.55),rgba(0,0,0,.85));color:#ecd49a;
+  font-family:"Kaiti SC","STKaiti","KaiTi","Noto Serif CJK SC","Songti SC","SimSun","WenQuanYi Zen Hei",serif;letter-spacing:.2em;user-select:none}
+#gate b{font-size:min(6vw,64px);letter-spacing:.35em;color:#f6dc9a;text-shadow:0 0 24px rgba(255,170,60,.6)}
+#gate span{margin-top:1.4em;font-size:min(2vw,20px)}
+#gate i{margin-top:.8em;font-size:min(1.4vw,14px);opacity:.7;font-style:normal;letter-spacing:.15em}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv" width="2560" height="1090"></canvas></div>
+<div id="gate"><b>甄 采 体 制</b><span>▶ 点击开启 · 配乐与影片同步</span><i>M 静音　F / 双击 全屏　循环播放 60 秒</i></div>
+<script>

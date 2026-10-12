@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>甄采体制 · 中国三千年制度变迁史 · 史诗编年影片</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
+canvas{display:block;width:min(100vw,calc(100vh * 2560 / 1090));height:auto;aspect-ratio:2560/1090;background:#000}
+#gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;
+  background:radial-gradient(ellipse at center,rgba(20,8,4,.55),rgba(0,0,0,.85));color:#ecd49a;
+  font-family:"Kaiti SC","STKaiti","KaiTi","Noto Serif CJK SC","Songti SC","SimSun","WenQuanYi Zen Hei",serif;letter-spacing:.2em;user-select:none}
+#gate b{font-size:min(6vw,64px);letter-spacing:.35em;color:#f6dc9a;text-shadow:0 0 24px rgba(255,170,60,.6)}
+#gate span{margin-top:1.4em;font-size:min(2vw,20px)}
+#gate i{margin-top:.8em;font-size:min(1.4vw,14px);opacity:.7;font-style:normal;letter-spacing:.15em}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv" width="2560" height="1090"></canvas></div>
+<div id="gate"><b>甄 采 体 制</b><span>▶ 点击开启 · 配乐与影片同步</span><i>M 静音　F / 双击 全屏　循环播放 60 秒</i></div>
+<script>
+/* ===== 核心：画布、时间轴、数学与绘图工具 ===== */
+const cv = document.getElementById('cv'), c = cv.getContext('2d');
+const W = 1280, H = 545, DUR = 60;           // 逻辑坐标；画布实际 2560×1090（2.35:1）
+const TAU = Math.PI * 2;
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const sm = x => { x = clamp(x); return x * x * (3 - 2 * x); };
+const eo = x => 1 - Math.pow(1 - clamp(x), 3);
+const ei = x => Math.pow(clamp(x), 3);
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const R = (i, k = 0) => hash(i * 7.31 + k * 19.17);               // 确定性伪随机
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const a = hash(xi + yi * 57), b = hash(xi + 1 + yi * 57), c1 = hash(xi + (yi + 1) * 57), d = hash(xi + 1 + (yi + 1) * 57);
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  return lerp(lerp(a, b, u), lerp(c1, d, u), v);
+}
+const rgba = (col, a = 1) => `rgba(${col[0]|0},${col[1]|0},${col[2]|0},${a})`;
+const mix = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+const SERIF = '"Songti SC","STSong","Noto Serif CJK SC","Source Han Serif SC","SimSun","Songti TC","WenQuanYi Zen Hei","Microsoft YaHei",serif';
+const KAI = '"Kaiti SC","STKaiti","KaiTi","楷体","Noto Serif CJK SC","Songti SC","SimSun","WenQuanYi Zen Hei",serif';
+
+// 色板：墨、朱砂、赭、青金、石绿、金
+const INK = [22, 14, 10], CIN = [190, 40, 32], GOLD = [226, 178, 84], JADE = [64, 138, 118], BLUE = [48, 98, 150], CYAN = [90, 220, 235], PAPER = [236, 222, 184];
+
+function glow(x, y, r, col, a = 1) {
+  const g = c.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, rgba(col, a)); g.addColorStop(1, rgba(col, 0));
+  c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r);
+}
+function vgrad(top, bot, y0 = 0, y1 = H) {
+  const g = c.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, top); g.addColorStop(1, bot); return g;
+}
+function txt(s, x, y, size, col, o = {}) {
+  c.save();
+  c.font = `${o.weight || ''} ${size}px ${o.font || SERIF}`;
+  c.textAlign = o.align || 'center'; c.textBaseline = o.base || 'middle';
+  if (o.ls) c.letterSpacing = o.ls + 'px';
+  c.globalAlpha *= (o.alpha === undefined ? 1 : o.alpha);
+  if (o.shadow) { c.shadowColor = o.shadow; c.shadowBlur = o.sb || 6; }
+  if (o.stroke) { c.lineWidth = o.sw || 3; c.strokeStyle = o.stroke; c.lineJoin = 'round'; c.strokeText(s, x, y); }
+  c.fillStyle = col; c.fillText(s, x, y);
+  c.restore();
+}
+function vtxt(s, x, y, size, col, o = {}) {      // 竖排
+  const n = [...s].length, sp = o.sp || 1.18; let i = 0;
+  for (const ch of s) { txt(ch, x, y + i * size * sp, size, col, { ...o, align: 'center' }); i++; }
+  return n * size * sp;
+}
+function seal(x, y, s, size, col = CIN, a = 1) {  // 朱文印
+  c.save(); c.globalAlpha *= a;
+  c.fillStyle = rgba(col, 0.92); c.fillRect(x - size / 2, y - size / 2, size, size);
+  c.strokeStyle = rgba([255, 230, 200], 0.55); c.lineWidth = 1.2; c.strokeRect(x - size / 2 + 2.5, y - size / 2 + 2.5, size - 5, size - 5);
+  const ch = [...s];
+  if (ch.length === 1) txt(s, x, y + 1, size * 0.72, '#f6e3c8', { font: KAI, weight: 'bold' });
+  else if (ch.length === 2) txt(s, x, y + 1, size * 0.46, '#f6e3c8', { font: KAI, weight: 'bold', ls: 0 });
+  else { const fs = size * 0.4; txt(ch[0] + ch[1], x, y - size * 0.22, fs, '#f6e3c8', { font: KAI, weight: 'bold' }); txt((ch[2] || '') + (ch[3] || ''), x, y + size * 0.22, fs, '#f6e3c8', { font: KAI, weight: 'bold' }); }
+  c.restore();
+}
+function flame(x, y, sz, t, col = [255, 150, 40]) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  glow(x, y - sz * 0.6, sz * 3.2, col, 0.35);
+  for (let k = 0; k < 3; k++) {
+    const w = sz * (1 - k * 0.28), h = sz * 2.1 * (1 - k * 0.22), fl = Math.sin(t * 13 + k * 2 + x) * sz * 0.12;
+    c.beginPath(); c.moveTo(x - w * 0.55, y);
+    c.bezierCurveTo(x - w * 0.7, y - h * 0.5, x - w * 0.1 + fl, y - h * 0.65, x + fl * 1.5, y - h);
+    c.bezierCurveTo(x + w * 0.2 + fl, y - h * 0.6, x + w * 0.75, y - h * 0.45, x + w * 0.55, y);
+    c.closePath();
+    c.fillStyle = k === 0 ? 'rgba(255,90,20,0.55)' : k === 1 ? 'rgba(255,170,50,0.6)' : 'rgba(255,240,170,0.75)'; c.fill();
+  }
+  c.restore();
+}
+function person(x, y, h, col, o = {}) {           // 剪影人物（足底落于 x,y）
+  const w = h * 0.2, sway = (o.walk || 0);
+  c.save(); c.fillStyle = col; c.strokeStyle = col; c.lineCap = 'round';
+  const sh = y - h * 0.8;
+  c.beginPath(); c.moveTo(x - w * 0.5, sh); c.lineTo(x + w * 0.5, sh);
+  c.lineTo(x + w * 0.85 + sway * 2, y); c.lineTo(x - w * 0.85 + sway * 2, y); c.closePath(); c.fill();
+  c.beginPath(); c.arc(x, y - h * 0.9, h * 0.07, 0, TAU); c.fill();
+  if (o.hat) { c.fillRect(x - h * 0.09, y - h * 0.99, h * 0.18, h * 0.045); if (o.hat === 2) { c.fillRect(x - h * 0.012, y - h * 1.14, h * 0.024, h * 0.16); } }
+  c.lineWidth = h * 0.05;
+  const aL = o.aL === undefined ? 1.9 : o.aL, aR = o.aR === undefined ? 1.2 : o.aR, L = h * 0.3;
+  c.beginPath(); c.moveTo(x - w * 0.45, sh + h * 0.02); c.lineTo(x - w * 0.45 + Math.cos(aL) * L, sh + h * 0.02 + Math.sin(aL) * L); c.stroke();
+  c.beginPath(); c.moveTo(x + w * 0.45, sh + h * 0.02); c.lineTo(x + w * 0.45 + Math.cos(aR) * L, sh + h * 0.02 + Math.sin(aR) * L); c.stroke();
+  c.restore();
+}
+function mount(baseY, amp, seed, col, scroll = 0, freq = 0.006, step = 14) {
+  c.beginPath(); c.moveTo(-10, H + 10);
+  for (let x = -10; x <= W + 10; x += step) {
+    const n = vnoise((x + scroll) * freq + seed * 9, seed) * 0.7 + vnoise((x + scroll) * freq * 2.7 + seed, 3) * 0.3;
+    c.lineTo(x, baseY - n * amp);
+  }
+  c.lineTo(W + 10, H + 10); c.closePath(); c.fillStyle = col; c.fill();
+}
+function roof(x, y, w, h, col) {                  // 歇山/庑殿屋顶剪影
+  c.fillStyle = col; c.beginPath();
+  c.moveTo(x - w * 0.62, y + h * 0.1); c.quadraticCurveTo(x - w * 0.4, y + h * 0.05, x - w * 0.25, y - h * 0.5);
+  c.lineTo(x + w * 0.25, y - h * 0.5); c.quadraticCurveTo(x + w * 0.4, y + h * 0.05, x + w * 0.62, y + h * 0.1);
+  c.lineTo(x + w * 0.5, y + h * 0.2); c.lineTo(x - w * 0.5, y + h * 0.2); c.closePath(); c.fill();
+  c.fillRect(x - w * 0.42, y + h * 0.2, w * 0.84, h * 0.12);
+  c.fillRect(x - w * 0.36, y + h * 0.3, w * 0.07, h * 0.9); c.fillRect(x + w * 0.29, y + h * 0.3, w * 0.07, h * 0.9);
+  c.fillRect(x - w * 0.04, y + h * 0.3, w * 0.08, h * 0.9);
+}
+function meander(x, y, w, h, col, a = 1) {       // 回纹带
+  c.save(); c.strokeStyle = rgba(col, a); c.lineWidth = 1.2; c.beginPath();
+  const u = h / 3;
+  for (let px = x; px < x + w - u * 3; px += u * 3.4) {
+    c.moveTo(px, y + h); c.lineTo(px, y); c.lineTo(px + u * 3, y); c.lineTo(px + u * 3, y + u * 2); c.lineTo(px + u, y + u * 2); c.lineTo(px + u, y + u);
+    c.lineTo(px + u * 2, y + u);
+  }
+  c.stroke(); c.restore();
+}
+function cmpCard(x, y, zh, xi, a, w = 330) {     // 中西对观卡片
+  if (a < 0.01) return;
+  c.save(); c.globalAlpha *= a;
+  c.fillStyle = 'rgba(8,6,6,0.62)'; c.fillRect(x, y, w, 62);
+  c.strokeStyle = rgba(GOLD, 0.6); c.lineWidth = 1; c.strokeRect(x + 0.5, y + 0.5, w - 1, 61);
+  seal(x + 20, y + 17, '中', 22, CIN); seal(x + 20, y + 45, '西', 22, [40, 82, 140]);
+  txt(zh, x + 40, y + 17, 15, '#f1d9a4', { align: 'left', font: KAI });
+  txt(xi, x + 40, y + 45, 15, '#bcd0ea', { align: 'left', font: KAI });
+  c.restore();
+}
+/* ===== 声：全部以 WebAudio 合成（陶埙 / 古琴 / 琵琶 / 民乐交响），与画面共用同一事件表 ===== */
+const EV = {
+  crack: [3.7, 4.15, 4.55, 4.9, 5.2], tuo: [5.9, 6.5, 7.1], gui: 8.3,
+  press: [10.9, 11.45, 12.0, 12.55], bang: 15.4,
+  stamp: 19.2, chain: 20.4,
+  shift: [26.0, 27.6], hand0: 28.0, handDt: 0.11, spread: 30.0,
+  flip: [32.0, 33.4, 34.8, 36.0],
+  snap: [39.2, 40.0, 40.8], robots: 41.5,
+  fork: 46.3, burst: 48.0,
+  bells: [0.4, 3, 10, 18, 25, 32, 37, 44, 51, 56],
+};
+EV.books = Array.from({ length: 9 }, (_, j) => 11.0 + j * 0.2);
+
+const SC = [];
+const add = (t, k, m, d, v, x) => SC.push({ t, k, m: m || 0, d: d || 0, v: v === undefined ? 0.7 : v, x });
+(function compose() {
+  // —— 上古周秦：陶埙为主，战鼓如心跳 ——
+  add(0.35, 'bell', 50, 4, 0.9); add(0.4, 'drum', 0, 0, 0.55); add(0.5, 'xun', 62, 2.3, 0.85);
+  add(3.0, 'bell', 50, 3, 0.7); add(3.0, 'drum', 0, 0, 0.8);
+  [[3.1, 57, 1.3], [4.5, 59, 0.6], [5.2, 62, 0.5], [5.8, 62, 0.7], [6.6, 64, 0.5], [7.2, 66, 0.9], [8.7, 69, 0.9], [9.5, 66, 0.7]].forEach(n => add(n[0], 'xun', n[1], n[2], 0.8));
+  EV.crack.forEach((t, i) => { add(t, 'crack', 0, 0, 0.8); add(t, 'drum', 0, 0, 0.3 + i * 0.08); });
+  EV.tuo.forEach(t => add(t, 'tuo', 0, 0, 0.7));
+  add(8.0, 'whoosh', 0, 0.35, 0.5);
+  add(EV.gui, 'bell', 50, 4, 1); add(EV.gui, 'gong', 38, 0, 0.8); add(EV.gui, 'drum', 0, 0, 1);
+  add(9.5, 'whoosh', 0, 0.5, 0.45);
+  // —— 中古唐宋：古琴，散音、泛音、吟猱 ——
+  add(10, 'bell', 62, 3, 0.8); add(10.05, 'qin', 38, 4, 0.9); add(10.5, 'qing', 86, 0, 0.5);
+  [[0, 45], [1, 50], [2, 52]].forEach((n, i) => { add(EV.press[i], 'wood', 0, 0, 0.8); add(EV.press[i] + 0.02, 'qin', n[1], 2.5, 0.8); });
+  add(EV.press[3], 'wood', 0, 0, 0.8); add(EV.press[3] + 0.02, 'qins', 54, 2.2, 0.8, 57);
+  EV.books.forEach((t, j) => add(t, 'wood', 0, 0, 0.18));
+  add(13.0, 'qin', 38, 4, 0.7); add(13.4, 'bell', 74, 2, 0.35);
+  [[13.2, 74], [13.7, 78], [14.2, 81], [14.7, 83], [15.05, 86]].forEach(n => add(n[0], 'qinh', n[1], 2.2, 0.55));
+  add(14.0, 'qing', 81, 0, 0.45);
+  add(EV.bang, 'gong', 50, 0, 0.9); add(EV.bang, 'drum', 0, 0, 0.9);
+  [50, 57, 62].forEach((m, i) => add(EV.bang + 0.05 + i * 0.05, 'qin', m, 3, 0.8));
+  add(16.5, 'rustle', 0, 0.7, 0.5);
+  [50, 54, 57, 62, 66].forEach((m, i) => add(16.9 + i * 0.16, 'qin', m, 2.5, 0.7));
+  add(17.6, 'qinh', 86, 2.4, 0.6); add(17.4, 'whoosh', 0, 0.6, 0.45);
+  // —— 近代古今：琵琶，轮指与扫弦 ——
+  add(18, 'bell', 45, 3, 0.8); add(18.0, 'drum', 0, 0, 0.6);
+  add(18.2, 'pipaT', 62, 0.9, 0.6);
+  add(EV.stamp, 'stamp', 0, 0, 1); add(EV.stamp, 'gong', 38, 0, 0.7);
+  [50, 57, 62, 66].forEach((m, i) => add(EV.stamp + 0.03 * i, 'pipa', m, 1.6, 0.9));
+  add(EV.chain, 'snap', 0, 0, 0.9); add(EV.chain, 'gong', 40, 0, 0.8); add(EV.chain + 0.02, 'drum', 0, 0, 1);
+  add(19.9, 'pipaT', 66, 0.6, 0.6);
+  const pp = [50, 57, 50, 62, 50, 57, 54, 59];
+  for (let i = 0; i < 18; i++) { const t = 20.7 + i * 0.25; add(t, 'pipa', pp[i % 8], 0.5, i % 4 === 0 ? 0.85 : 0.55); }
+  for (let t = 21.0; t < 24.5; t += 0.5) { add(t, 'chuff', 0, 0, 0.55); add(t, 'drum', 0, 0, 0.4); }
+  add(22.0, 'pipaT', 69, 1.2, 0.5); add(23.3, 'pipaT', 74, 1.4, 0.65);
+  add(23.4, 'whoosh', 0, 1.5, 0.6);
+  // —— 当代追赶：民乐交响登场 ——
+  add(25, 'bell', 50, 4, 1); add(25, 'drum', 0, 0, 1); add(25, 'gong', 38, 0, 0.8);
+  add(25.1, 'erhu', 69, 2.6, 0.7); add(25.1, 'erhu', 57, 2.6, 0.45);
+  EV.shift.forEach(t => { add(t, 'clang', 0, 0, 0.9); add(t, 'drum', 0, 0, 0.9); add(t, 'gong', 45, 0, 0.5); });
+  [[27.7, 74, 0.5], [28.2, 76, 0.5], [28.7, 74, 0.5], [29.2, 71, 0.7], [29.9, 69, 0.5]].forEach(n => add(n[0], 'erhu', n[1], n[2], 0.55));
+  for (let i = 0; i < 18; i++) add(EV.hand0 + i * EV.handDt, 'wood', 0, 0, 0.45 + (i % 3 === 0 ? 0.2 : 0));
+  for (let t = 26.4; t < 31.9; t += 0.5) add(t, 'drum', 0, 0, 0.35);
+  add(EV.spread, 'drum', 0, 0, 1); add(EV.spread, 'gong', 38, 0, 0.9); add(EV.spread, 'bell', 62, 3, 0.7);
+  [50, 52, 54, 57, 59, 62, 64, 66, 69, 71, 74].forEach((m, i) => add(EV.spread + 0.05 + i * 0.07, 'zheng', m, 1.2, 0.7));
+  EV.flip.forEach((t, i) => {
+    add(t, 'bell', [62, 57, 59, 62][i], 3, 0.8); add(t, 'drum', 0, 0, 0.8);
+    const base = [[74, 71, 69], [69, 71, 74], [71, 74, 76], [74, 78, 81]][i];
+    base.forEach((m, k) => add(t + 0.1 + k * 0.3, 'di', m, 0.6, 0.6));
+    [50, 57, 62].forEach((m, k) => add(t + 0.05 + k * 0.06, 'zheng', m, 1.5, 0.6));
+  });
+  for (let t = 32.5; t < 37; t += 0.5) add(t, 'drum', 0, 0, 0.35);
+  add(36.4, 'whoosh', 0, 0.7, 0.6);
+  // —— 智能时代：民乐交响，节奏渐强，最终回归陶埙 ——
+  add(37, 'bell', 50, 4, 1); add(37, 'gong', 38, 0, 0.9);
+  for (let t = 37; t < 56.0; t += 0.5) { const bar = Math.round((t - 37) / 0.5) % 4 === 0; add(t, 'drum', 0, 0, bar ? 0.9 : 0.5); if (t > 38.9 && t < 55.5) add(t + 0.25, 'wood', 0, 0, 0.18); }
+  const arp = [50, 57, 62, 66, 69, 66, 62, 57];
+  for (let i = 0; i < 24; i++) add(37.0 + i * 0.25, 'pipa', arp[i % 8], 0.4, i % 8 === 0 ? 0.75 : 0.45);
+  EV.snap.forEach((t, i) => { add(t, 'snap', 0, 0, 1); add(t, 'gong', 38 + i * 2, 0, 0.8); });
+  const theme = [[0, 69, .5], [.5, 71, .5], [1, 74, 1], [2, 76, .5], [2.5, 74, .5], [3, 71, 1], [4, 69, .5], [4.5, 71, .5], [5, 74, .5], [5.5, 78, 1.5]];
+  [41.5, 47.5].forEach(st => theme.forEach(n => { add(st + n[0], 'di', n[1] + 12 > 86 ? n[1] : n[1], n[2], 0.75); add(st + n[0], 'erhu', n[1] - 12, n[2] + 0.05, 0.5); }));
+  [[37.5, 74, 1], [38.5, 76, 1], [40, 78, 1.4]].forEach(n => add(n[0], 'di', n[1], n[2], 0.6));
+  add(EV.robots, 'bell', 62, 3, 0.8); add(EV.robots, 'gong', 38, 0, 0.8);
+  for (let i = 0; i < 12; i++) add(EV.robots + i * 0.125 + 0.05, 'zheng', arp[i % 8] + 12, 0.5, 0.45);
+  add(43.4, 'whoosh', 0, 0.7, 0.6);
+  add(44, 'bell', 50, 4, 1); add(44.0, 'gong', 38, 0, 0.9);
+  [[44.2, 62, 4], [44.2, 69, 4]].forEach(n => add(n[0], 'erhu', n[1], n[2], 0.5));
+  add(45.8, 'whoosh', 0, 0.5, 0.6); add(EV.fork, 'gong', 45, 0, 0.9); add(EV.fork, 'bell', 74, 3, 0.8);
+  [57, 62, 66, 69, 74].forEach((m, i) => add(EV.burst + i * 0.08, 'zheng', m + 12 * (i > 2 ? 1 : 0), 1.8, 0.7)); add(EV.burst, 'bell', 86, 4, 0.7);
+  add(50.5, 'whoosh', 0, 0.5, 0.55);
+  add(51, 'bell', 50, 4, 1); add(51, 'gong', 38, 0, 0.8);
+  for (let i = 0; i < 20; i++) add(51.0 + i * 0.25, 'zheng', arp[i % 8] + (i % 16 > 7 ? 12 : 0), 0.7, 0.4);
+  add(55.4, 'whoosh', 0, 0.6, 0.6);
+  add(56, 'bell', 50, 5, 1); add(56, 'gong', 38, 0, 1); add(56, 'drum', 0, 0, 1);
+  [50, 57, 62, 66, 69].forEach(m => add(56.0, 'erhu', m, 3, 0.45));
+  [62, 69, 74, 78].forEach((m, i) => add(56.05 + i * 0.05, 'pipa', m, 1.5, 0.8));
+  add(56.8, 'bell', 74, 3, 0.55); add(57.2, 'qing', 86, 0, 0.5);
+  add(58.0, 'xun', 62, 1.8, 0.7);                         // 余音回到开篇陶埙，循环自洽
+  SC.sort((a, b) => a.t - b.t);
+})();
+const KICKS = SC.filter(e => e.k === 'drum' || e.k === 'stamp' || e.k === 'snap').map(e => ({ t: e.t, v: e.v }));
+function pulse(t, decay = 0.2, minv = 0) {          // 画面脉冲：取最近一次鼓点
+  let best = 0;
+  for (let i = KICKS.length - 1; i >= 0; i--) {
+    const k = KICKS[i]; if (k.t > t) continue; const age = t - k.t; if (age > 1.2) break;
+    best = Math.max(best, k.v * Math.exp(-age / decay) * (k.v >= minv ? 1 : 0));
+  }
+  return best;
+}
+
+/* —— 合成器 —— */
+let AC = null, master = null, rev = null, noiseBuf = null, muted = false, ksCache = {};
+function dest(n, wet = 0.25) { n.connect(master); const s = AC.createGain(); s.gain.value = wet; n.connect(s); s.connect(rev); }
+function envG(t0, a, d, v, r) {
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v, t0 + a);
+  g.gain.setValueAtTime(v, t0 + Math.max(a, d)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + r); return g;
+}
+const mf = m => 440 * Math.pow(2, (m - 69) / 12);
+function noiseSrc(t0, dur) { const s = AC.createBufferSource(); s.buffer = noiseBuf; s.loop = true; s.start(t0, Math.random() * 1.5); s.stop(t0 + dur); return s; }
+function ksBuf(f, sec, damp, bright) {
+  const key = [f.toFixed(1), sec, damp, bright].join('|'); if (ksCache[key]) return ksCache[key];
+  const sr = AC.sampleRate, N = Math.max(2, Math.round(sr / f)), L = Math.floor(sr * sec);
+  const b = AC.createBuffer(1, L, sr), d = b.getChannelData(0); let prev = 0;
+  for (let i = 0; i < N; i++) { prev = prev * (1 - bright) + (Math.random() * 2 - 1) * bright; d[i] = prev; }
+  for (let i = N; i < L; i++) d[i] = damp * 0.5 * (d[i - N] + d[i - N + 1]);
+  let mx = 0; for (let i = 0; i < L; i += 7) mx = Math.max(mx, Math.abs(d[i])); const sc = 0.9 / (mx || 1);
+  for (let i = 0; i < L; i++) d[i] *= sc;
+  return (ksCache[key] = b);
+}
+function pluck(t0, f, v, sec, damp, bright, wet, slideTo, lp) {
+  const s = AC.createBufferSource(); s.buffer = ksBuf(f, sec, damp, bright);
+  if (slideTo) { s.playbackRate.setValueAtTime(1, t0 + 0.25); s.playbackRate.linearRampToValueAtTime(slideTo / f, t0 + 0.9); }
+  const g = AC.createGain(); g.gain.value = v;
+  const fl = AC.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = lp || 6000;
+  s.connect(fl); fl.connect(g); dest(g, wet); s.start(t0);
+}
+const INST = {
+  xun(t0, e) {
+    const f = mf(e.m), d = e.d, o = AC.createOscillator(), o2 = AC.createOscillator(), lfo = AC.createOscillator(), lg = AC.createGain();
+    o.type = 'sine'; o2.type = 'sine'; o.frequency.setValueAtTime(f * 0.96, t0); o.frequency.linearRampToValueAtTime(f, t0 + 0.15); o2.frequency.value = f * 2;
+    lfo.frequency.value = 4.8; lg.gain.setValueAtTime(0, t0); lg.gain.linearRampToValueAtTime(f * 0.008, t0 + d * 0.6); lfo.connect(lg); lg.connect(o.frequency);
+    const g = envG(t0, 0.22, d, e.v * 0.5, 0.7), g2 = AC.createGain(); g2.gain.value = 0.1;
+    const n = noiseSrc(t0, d + 0.9), bp = AC.createBiquadFilter(), ng = envG(t0, 0.15, d, 0.05 * e.v, 0.6); bp.type = 'bandpass'; bp.frequency.value = f * 2.2; bp.Q.value = 2.5;
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1800;
+    o.connect(g); o2.connect(g2); g2.connect(g); n.connect(bp); bp.connect(ng); ng.connect(lp); g.connect(lp); dest(lp, 0.55);
+    [o, o2, lfo].forEach(x => { x.start(t0); x.stop(t0 + d + 0.95); });
+  },
+  qin(t0, e) { pluck(t0, mf(e.m), e.v * 0.9, Math.min(4, e.d + 1), 0.9992, 0.5, 0.45, 0, 2600); },
+  qins(t0, e) { pluck(t0, mf(e.m), e.v * 0.9, 3, 0.9992, 0.5, 0.45, mf(e.x), 2600); },
+  qinh(t0, e) {
+    const f = mf(e.m), o = AC.createOscillator(), o2 = AC.createOscillator(); o.frequency.value = f; o2.frequency.value = f * 2.001;
+    const g = envG(t0, 0.005, 0.05, e.v * 0.35, e.d), g2 = AC.createGain(); g2.gain.value = 0.25; o.connect(g); o2.connect(g2); g2.connect(g); dest(g, 0.6);
+    o.start(t0); o2.start(t0); o.stop(t0 + e.d + 0.2); o2.stop(t0 + e.d + 0.2);
+  },
+  pipa(t0, e) { pluck(t0, mf(e.m), e.v * 0.85, 1.8, 0.9965, 0.9, 0.3, 0, 7500); },
+  pipaT(t0, e) { const n = Math.floor(e.d / 0.06); for (let i = 0; i < n; i++) pluck(t0 + i * 0.06, mf(e.m), e.v * (0.35 + 0.45 * Math.sin(Math.PI * (i / n))), 0.9, 0.995, 0.9, 0.3, 0, 7000); },
+  zheng(t0, e) { pluck(t0, mf(e.m), e.v * 0.75, 2.2, 0.9985, 0.8, 0.4, 0, 6500); },
+  erhu(t0, e) {
+    const f = mf(e.m), d = e.d, o = AC.createOscillator(), o2 = AC.createOscillator(), lfo = AC.createOscillator(), lg = AC.createGain();
+    o.type = 'sawtooth'; o2.type = 'sawtooth'; o.frequency.value = f; o2.frequency.value = f * 1.004; lfo.frequency.value = 5.6;
+    lg.gain.setValueAtTime(0, t0); lg.gain.linearRampToValueAtTime(f * 0.011, t0 + 0.5); lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+    const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = Math.max(900, f * 3); bp.Q.value = 0.9;
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3000;
+    const g = envG(t0, 0.14, d, e.v * 0.2, 0.5); o.connect(bp); o2.connect(bp); bp.connect(lp); lp.connect(g); dest(g, 0.4);
+    [o, o2, lfo].forEach(x => { x.start(t0); x.stop(t0 + d + 0.6); });
+  },
+  di(t0, e) {
+    const f = mf(e.m), d = e.d, o = AC.createOscillator(), o2 = AC.createOscillator(), lfo = AC.createOscillator(), lg = AC.createGain();
+    o.type = 'sine'; o2.type = 'triangle'; o.frequency.value = f; o2.frequency.value = f * 2; lfo.frequency.value = 5.4; lg.gain.value = f * 0.007; lfo.connect(lg); lg.connect(o.frequency);
+    const g = envG(t0, 0.05, d, e.v * 0.32, 0.25), g2 = AC.createGain(); g2.gain.value = 0.18; o.connect(g); o2.connect(g2); g2.connect(g);
+    const n = noiseSrc(t0, d + 0.4), bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * 3; bp.Q.value = 4; const ng = envG(t0, 0.03, d, 0.06 * e.v, 0.2);
+    n.connect(bp); bp.connect(ng); ng.connect(g); dest(g, 0.4);
+    [o, o2, lfo].forEach(x => { x.start(t0); x.stop(t0 + d + 0.4); });
+  },
+  drum(t0, e) {
+    const o = AC.createOscillator(); o.frequency.setValueAtTime(150, t0); o.frequency.exponentialRampToValueAtTime(45, t0 + 0.2);
+    const g = envG(t0, 0.003, 0.02, e.v * 1.0, 0.55); o.connect(g); dest(g, 0.3); o.start(t0); o.stop(t0 + 0.7);
+    const n = noiseSrc(t0, 0.15), lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500; const ng = envG(t0, 0.002, 0.01, e.v * 0.4, 0.1); n.connect(lp); lp.connect(ng); dest(ng, 0.2);
+  },
+  wood(t0, e) {
+    const o = AC.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(1000, t0); o.frequency.exponentialRampToValueAtTime(520, t0 + 0.06);
+    const g = envG(t0, 0.001, 0.005, e.v * 0.5, 0.09); o.connect(g); dest(g, 0.25); o.start(t0); o.stop(t0 + 0.2);
+  },
+  gong(t0, e) {
+    const f = mf(e.m); [1, 1.52, 2.31, 2.97, 3.6].forEach((r, i) => {
+      const o = AC.createOscillator(); o.frequency.value = f * r; const g = envG(t0, 0.006, 0.02, e.v * 0.28 / (1 + i * 0.5), 2.8 - i * 0.3); o.connect(g); dest(g, 0.5); o.start(t0); o.stop(t0 + 3.4);
+    });
+  },
+  bell(t0, e) {
+    const f = mf(e.m); [[1, 1], [2.0, 0.5], [2.76, 0.4], [4.07, 0.22], [1.005, 0.7]].forEach(([r, a], i) => {
+      const o = AC.createOscillator(); o.frequency.value = f * r; const g = envG(t0, 0.004, 0.02, e.v * 0.3 * a, Math.min(e.d, 4.5) / (1 + i * 0.35)); o.connect(g); dest(g, 0.55); o.start(t0); o.stop(t0 + e.d + 0.5);
+    });
+  },
+  qing(t0, e) { const f = mf(e.m), o = AC.createOscillator(); o.frequency.value = f; const g = envG(t0, 0.003, 0.02, e.v * 0.25, 1.8); o.connect(g); dest(g, 0.6); o.start(t0); o.stop(t0 + 2.2); },
+  tuo(t0, e) {
+    [[520, 1], [1130, 0.55], [1750, 0.3]].forEach(([f, a]) => { const o = AC.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = envG(t0, 0.002, 0.01, e.v * 0.28 * a, 0.7); o.connect(g); dest(g, 0.4); o.start(t0); o.stop(t0 + 0.9); });
+    INST.wood(t0, { v: 0.5 });
+  },
+  crack(t0, e) {
+    const n = noiseSrc(t0, 0.2), hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2200; const g = envG(t0, 0.001, 0.015, e.v * 0.6, 0.06); n.connect(hp); hp.connect(g); dest(g, 0.2);
+    const o = AC.createOscillator(); o.frequency.value = 90; const g2 = envG(t0, 0.001, 0.01, e.v * 0.4, 0.1); o.connect(g2); dest(g2, 0.2); o.start(t0); o.stop(t0 + 0.2);
+  },
+  rustle(t0, e) {
+    const n = noiseSrc(t0, e.d + 0.1), bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 4200; bp.Q.value = 0.8;
+    const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t0); for (let i = 0; i < 12; i++) g.gain.linearRampToValueAtTime(e.v * 0.15 * (0.3 + Math.random()), t0 + (i + 1) * e.d / 12); g.gain.linearRampToValueAtTime(0.0001, t0 + e.d + 0.05);
+    n.connect(bp); bp.connect(g); dest(g, 0.2);
+  },
+  whoosh(t0, e) {
+    const n = noiseSrc(t0, e.d * 2 + 0.2), bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2; bp.frequency.setValueAtTime(300, t0); bp.frequency.exponentialRampToValueAtTime(3800, t0 + e.d * 1.6);
+    const g = envG(t0, e.d * 1.2, e.d * 1.2, e.v * 0.25, e.d * 0.8); n.connect(bp); bp.connect(g); dest(g, 0.35);
+  },
+  chuff(t0, e) { const n = noiseSrc(t0, 0.3), lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400; const g = envG(t0, 0.004, 0.03, e.v * 0.4, 0.14); n.connect(lp); lp.connect(g); dest(g, 0.2); },
+  snap(t0, e) {
+    const n = noiseSrc(t0, 0.3), hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1500; const g = envG(t0, 0.001, 0.02, e.v * 0.6, 0.12); n.connect(hp); hp.connect(g); dest(g, 0.3);
+    const o = AC.createOscillator(); o.frequency.setValueAtTime(700, t0); o.frequency.exponentialRampToValueAtTime(70, t0 + 0.3); const g2 = envG(t0, 0.002, 0.02, e.v * 0.5, 0.3); o.connect(g2); dest(g2, 0.3); o.start(t0); o.stop(t0 + 0.6);
+  },
+  clang(t0, e) { [1800, 2700, 3900].forEach((f, i) => { const o = AC.createOscillator(); o.frequency.value = f; const g = envG(t0, 0.001, 0.01, e.v * 0.15 / (i + 1), 0.25); o.connect(g); dest(g, 0.35); o.start(t0); o.stop(t0 + 0.5); }); INST.wood(t0, { v: 0.9 }); },
+  stamp(t0, e) {
+    const o = AC.createOscillator(); o.frequency.setValueAtTime(110, t0); o.frequency.exponentialRampToValueAtTime(38, t0 + 0.3); const g = envG(t0, 0.002, 0.02, e.v, 0.5); o.connect(g); dest(g, 0.35); o.start(t0); o.stop(t0 + 0.8);
+    const n = noiseSrc(t0, 0.2), lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; const g2 = envG(t0, 0.001, 0.02, e.v * 0.6, 0.15); n.connect(lp); lp.connect(g2); dest(g2, 0.3);
+  },
+};
+function startAudio() {
+  if (AC) { AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  const comp = AC.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 4; comp.attack.value = 0.005; comp.release.value = 0.25;
+  master = AC.createGain(); master.gain.value = muted ? 0 : 0.5; master.connect(comp);
+  const lim = AC.createDynamicsCompressor(); lim.threshold.value = -4; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.12; comp.connect(lim); lim.connect(AC.destination);
+  rev = AC.createConvolver(); const len = Math.floor(AC.sampleRate * 2.8), ib = AC.createBuffer(2, len, AC.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = ib.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+  rev.buffer = ib; const rg = AC.createGain(); rg.gain.value = 0.7; rev.connect(rg); rg.connect(master);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  // 预生成弹拨缓冲
+  SC.forEach(e => { try {
+    if (e.k === 'qin') ksBuf(mf(e.m), Math.min(4, e.d + 1), 0.9992, 0.5);
+    else if (e.k === 'qins') ksBuf(mf(e.m), 3, 0.9992, 0.5);
+    else if (e.k === 'pipa') ksBuf(mf(e.m), 1.8, 0.9965, 0.9);
+    else if (e.k === 'pipaT') ksBuf(mf(e.m), 0.9, 0.995, 0.9);
+    else if (e.k === 'zheng') ksBuf(mf(e.m), 2.2, 0.9985, 0.8);
+  } catch (_) { } });
+}
+function setMuted(m) { muted = m; if (master) master.gain.value = m ? 0 : 0.5; }
+let sIdx = 0, sCycle = 0, sInit = false;
+function audioReset(T) { sInit = false; }
+function audioTick(T) {                              // T：由 rAF 时间戳换算的绝对影片时间（秒）
+  if (!AC || AC.state !== 'running') return;
+  const LOOK = 0.35, now = AC.currentTime;
+  if (!sInit) { sCycle = Math.floor(T / DUR); const lt = T - sCycle * DUR; sIdx = SC.findIndex(e => e.t >= lt - 0.02); if (sIdx < 0) { sIdx = 0; sCycle++; } sInit = true; }
+  let guard = 0;
+  while (guard++ < 200) {
+    const e = SC[sIdx], abs = sCycle * DUR + e.t;
+    if (abs > T + LOOK) break;
+    if (abs >= T - 0.06) { try { INST[e.k](now + Math.max(0.005, abs - T), e); } catch (err) { } }
+    sIdx++; if (sIdx >= SC.length) { sIdx = 0; sCycle++; }
+  }
+}
+/* ===== 分镜 · 序、第7章、第8章、第9章 ===== */
+function scPrologue(s, t) {
+  c.fillStyle = '#060403'; c.fillRect(0, 0, W, H);
+  glow(W / 2, H / 2 + 10, 520, [120, 70, 30], 0.35 + 0.1 * Math.sin(t * 2));
+  // 浮尘
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 60; i++) { const x = (R(i) * W + t * (6 + R(i, 2) * 14)) % W, y = (R(i, 1) * H - t * (4 + R(i, 3) * 8) + H * 3) % H; c.fillStyle = `rgba(240,200,130,${0.15 + 0.2 * R(i, 4)})`; c.fillRect(x, y, 1.5, 1.5); }
+  c.restore();
+  const ch = [...'甄采体制'];
+  ch.forEach((g, i) => {
+    const t0 = 0.4 + i * 0.2, a = sm(seg(s, t0, t0 + 0.5)); if (a <= 0) return;
+    const x = W / 2 + (i - 1.5) * 170;
+    c.save(); c.translate(x, 245); c.scale(1 + 0.15 * (1 - a), 1 + 0.15 * (1 - a)); c.globalAlpha *= a;
+    glow(0, 0, 150, GOLD, 0.22 + 0.2 * pulse(t, 0.4));
+    txt(g, 3, 4, 150, 'rgba(0,0,0,0.55)', { font: KAI, weight: 'bold' });
+    const gr = c.createLinearGradient(0, -75, 0, 75); gr.addColorStop(0, '#f6dc9a'); gr.addColorStop(1, '#b57a2c');
+    txt(g, 0, 0, 150, gr, { font: KAI, weight: 'bold' });
+    c.restore();
+  });
+  const a2 = sm(seg(s, 1.5, 2.2));
+  txt('中国三千年制度变迁史', W / 2, 352, 30, '#e8cf9a', { alpha: a2, font: KAI, ls: 10 });
+  txt('史诗编年 · 公元前1046年 — 公元2026年', W / 2, 392, 14, '#b89b6a', { alpha: a2 * 0.85, ls: 4 });
+  c.save(); c.globalAlpha *= a2; c.strokeStyle = rgba(GOLD, 0.6); c.lineWidth = 1.2; c.beginPath(); c.moveTo(W / 2 - 220, 322); c.lineTo(W / 2 + 220, 322); c.stroke(); c.restore();
+  seal(W / 2 + 330, 330, '甄采', 40, CIN, a2);
+}
+
+/* ---------- 第7章 采诗官与贞人的黄昏 ---------- */
+function shellPts(rx, ry) {
+  const p = []; for (let i = 0; i < 64; i++) { const a = i / 64 * TAU, ca = Math.cos(a), sa = Math.sin(a); p.push([rx * Math.sign(ca) * Math.pow(Math.abs(ca), 0.78), ry * Math.sign(sa) * Math.pow(Math.abs(sa), 0.9) * (sa < 0 ? 0.97 : 1.04)]); }
+  return p;
+}
+function sc7(s, t) {
+  c.fillStyle = vgrad('#120a06', '#3a1c0d'); c.fillRect(0, 0, W, H);
+  const gA = 1 - sm(seg(s, 2.55, 3.15)), gB = sm(seg(s, 2.6, 3.2)) * (1 - sm(seg(s, 4.75, 5.35))), gC = sm(seg(s, 4.8, 5.4));
+  const ga = c.globalAlpha;
+  // —— A 殷墟甲骨，贞人占卜 ——
+  if (gA > 0.01) {
+    c.globalAlpha = ga * gA;
+    glow(640, 130, 330, [200, 120, 50], 0.28); c.strokeStyle = 'rgba(230,170,90,0.18)'; c.lineWidth = 2; c.beginPath(); c.arc(640, 130, 150 + 6 * Math.sin(t * 1.5), 0, TAU); c.stroke();
+    txt('帝', 640, 130, 120, 'rgba(240,190,110,0.16)', { font: KAI, weight: 'bold' });
+    // 龟甲
+    c.save(); c.translate(640, 305);
+    const pts = shellPts(255, 168);
+    c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath();
+    const sg = c.createRadialGradient(-30, -40, 20, 0, 0, 260); sg.addColorStop(0, '#dcc283'); sg.addColorStop(0.7, '#a98650'); sg.addColorStop(1, '#6a4b27'); c.fillStyle = sg; c.fill();
+    c.lineWidth = 3; c.strokeStyle = '#2a170a'; c.stroke(); c.save(); c.clip();
+    for (let i = 0; i < 140; i++) { c.fillStyle = `rgba(50,28,12,${0.08 + R(i) * 0.14})`; c.beginPath(); c.arc((R(i, 1) - 0.5) * 520, (R(i, 2) - 0.5) * 340, 0.8 + R(i, 3) * 2.2, 0, TAU); c.fill(); }
+    c.strokeStyle = 'rgba(45,25,10,0.55)'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(0, -170); c.lineTo(0, 175); c.stroke();
+    [-95, -30, 38, 100].forEach((y, k) => { c.beginPath(); c.moveTo(-250, y + 10 * (k % 2)); c.quadraticCurveTo(-120, y - 14, 0, y); c.quadraticCurveTo(120, y - 14, 250, y + 10 * (k % 2)); c.stroke(); });
+    ['帝', '王', '贞', '雨', '年', '祀', '戎', '受'].forEach((g, i) => { const col = i < 4 ? -1 : 1, row = i % 4; txt(g, col * (155 + (row % 2) * 30), -95 + row * 62, 24, 'rgba(60,32,12,0.65)', { font: KAI }); });
+    // 钻凿与兆纹
+    const pit = [[-0, -108], [0, -48], [0, 12], [0, 72], [0, 124]];
+    pit.forEach((p, i) => {
+      const t0 = EV.crack[i], heat = sm(seg(t, t0 - 0.35, t0)) * (1 - sm(seg(t, t0 + 0.05, t0 + 1.2)));
+      c.fillStyle = '#2a1608'; c.beginPath(); c.ellipse(p[0], p[1], 7, 4, 0, 0, TAU); c.fill();
+      if (heat > 0.01) { c.save(); c.globalCompositeOperation = 'lighter'; glow(p[0], p[1], 46, [255, 120, 30], 0.7 * heat); c.restore(); }
+      const pr = eo(seg(t, t0, t0 + 0.3)), L = 38;
+      if (pr > 0) {
+        c.strokeStyle = `rgba(30,12,4,0.95)`; c.lineWidth = 2.4; c.lineCap = 'round';
+        c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(p[0], p[1] - L * pr); c.stroke();
+        c.beginPath(); c.moveTo(p[0], p[1] - L * 0.45 * pr); c.lineTo(p[0] + 30 * pr * (i % 2 ? -1 : 1), p[1] - L * 0.62 * pr); c.stroke();
+        c.save(); c.globalCompositeOperation = 'lighter'; c.strokeStyle = `rgba(255,140,40,${0.9 * (1 - sm(seg(t, t0 + 0.2, t0 + 1.4)))})`; c.lineWidth = 1.2;
+        c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(p[0], p[1] - L * pr); c.stroke(); c.restore();
+      }
+    });
+    c.restore();   // clip
+    c.restore();   // translate
+    // 火星
+    c.save(); c.globalCompositeOperation = 'lighter';
+    EV.crack.forEach((t0, i) => { const age = t - t0; if (age < 0 || age > 1) return; const px = 640, py = 305 - 108 + i * 58 - 0;
+      for (let k = 0; k < 14; k++) { const a = R(i * 20 + k) * TAU, sp = 40 + R(i * 20 + k, 1) * 120; c.fillStyle = `rgba(255,${150 + R(k) * 90 | 0},60,${1 - age})`; c.fillRect(px + Math.cos(a) * sp * age, py + Math.sin(a) * sp * age + 120 * age * age, 2, 2); } });
+    c.restore();
+    // 贞人、火盆
+    person(230, 470, 250, '#0a0503', { aL: -1.75, aR: -1.4, hat: 2 }); flame(330, 468, 16, t);
+    c.fillStyle = '#0a0503'; c.beginPath(); c.moveTo(300, 448); c.lineTo(360, 448); c.lineTo(350, 470); c.lineTo(310, 470); c.closePath(); c.fill();
+    person(1040, 470, 150, '#0a0503', { aL: 1.0, aR: 2.0 }); person(1110, 470, 130, '#0a0503', { aL: 1.2, aR: 1.9 });
+    // 烟
+    c.strokeStyle = 'rgba(200,170,130,0.14)'; c.lineWidth = 6; for (let k = 0; k < 3; k++) { c.beginPath(); for (let y = 445; y > 120; y -= 10) { const x = 330 + Math.sin(y * 0.03 + t * 1.5 + k) * (20 + (445 - y) * 0.12) + k * 12; y === 445 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke(); }
+    txt('殷墟 YH127 · 贞人集团占卜行政 · 绝地天通的通神垄断', 640, 70, 16, 'rgba(230,200,150,0.85)', { font: KAI, ls: 3, alpha: sm(seg(s, 0.6, 1.2)) });
+  }
+  // —— B 周人以德配天，采诗官摇木铎 ——
+  if (gB > 0.01) {
+    c.globalAlpha = ga * gB;
+    c.fillStyle = vgrad('#4a3326', '#e0b070', 0, 340); c.fillRect(0, 0, W, 340);
+    const sx = 870, sy = 270; glow(sx, sy, 300, [255, 210, 130], 0.8); c.fillStyle = '#fff1c8'; c.beginPath(); c.arc(sx, sy, 38, 0, TAU); c.fill();
+    mount(300, 120, 1, 'rgba(70,45,30,0.55)', s * 4, 0.004); mount(335, 80, 2, 'rgba(50,30,20,0.75)', s * 9, 0.005);
+    c.fillStyle = vgrad('#6a4a2a', '#2c1a0e', 335, H); c.fillRect(0, 335, W, H - 335);
+    roof(1010, 245, 190, 40, '#1b0f08');
+    c.fillStyle = 'rgba(255,200,120,0.25)'; c.fillRect(960, 285, 100, 50);
+    txt('宗庙', 1010, 215, 14, 'rgba(240,200,140,0.9)', { font: KAI, ls: 4 });
+    // 田垄与庶人
+    c.strokeStyle = 'rgba(30,18,8,0.45)'; c.lineWidth = 2; for (let k = 0; k < 7; k++) { c.beginPath(); c.moveTo(0, 360 + k * 24); c.quadraticCurveTo(W / 2, 350 + k * 24 + (k % 2) * 10, W, 360 + k * 24); c.stroke(); }
+    const vx = [200, 330, 470, 600, 700, 820, 940, 1090];
+    vx.forEach((x, i) => { const y = 400 + (i % 3) * 22 + 20; person(x, y, 60 + (i % 3) * 8, '#120a05', { aL: 1.1 + 0.25 * Math.sin(t * 3 + i), aR: 0.5 + 0.3 * Math.cos(t * 2 + i) }); });
+    // 采诗官
+    const ox = lerp(110, 820, seg(s, 2.7, 5.2)), oy = 440, step = Math.sin(t * 8) * 2;
+    person(ox, oy - Math.abs(step), 165, '#0b0604', { hat: 1, aL: 1.3, aR: -1.2, walk: step });
+    const sw = Math.sin(t * 9) * 0.35 + EV.tuo.reduce((a, t0) => a + (t > t0 ? Math.exp(-(t - t0) * 3) * Math.sin((t - t0) * 24) * 0.7 : 0), 0);
+    c.strokeStyle = '#0b0604'; c.lineWidth = 3; c.beginPath(); c.moveTo(ox + 28, oy - 110); c.lineTo(ox + 62, oy - 200); c.stroke();
+    c.save(); c.translate(ox + 62, oy - 200); c.rotate(sw); c.fillStyle = '#c99a3a'; c.beginPath(); c.moveTo(-10, 0); c.quadraticCurveTo(-14, 20, -16, 26); c.lineTo(16, 26); c.quadraticCurveTo(14, 20, 10, 0); c.closePath(); c.fill(); c.fillStyle = '#5a3a14'; c.fillRect(-2, 22, 4, 10); c.restore();
+    c.fillStyle = '#2b1a0c'; c.fillRect(ox - 34, oy - 96, 22, 30);           // 竹篮
+    EV.tuo.forEach(t0 => { const a = t - t0; if (a < 0 || a > 1) return; c.strokeStyle = `rgba(255,220,150,${0.7 * (1 - a)})`; c.lineWidth = 2; c.beginPath(); c.arc(ox + 62, oy - 180, 10 + a * 150, 0, TAU); c.stroke(); });
+    // 诗句：自庶人升起，汇入采诗官之篮，再奉入宗庙
+    const poem = [...'关关雎鸠在河之洲窈窕淑女君子好逑'];
+    c.save(); c.globalCompositeOperation = 'lighter';
+    poem.forEach((g, i) => {
+      const t0 = 3.0 + i * 0.13 + 3.0 * 0, age = s - t0; if (age < 0 || age > 2.2) return;
+      const vxp = vx[i % vx.length], vyp = 360; let x, y;
+      if (age < 1.0) { const u = eo(age / 1.0); x = lerp(vxp, ox - 22, u); y = lerp(vyp, oy - 90, u) - Math.sin(u * Math.PI) * 70; }
+      else { const u = sm((age - 1.0) / 1.2); x = lerp(ox - 22, 1010, u); y = lerp(oy - 90, 300, u) - Math.sin(u * Math.PI) * 120; }
+      const a = Math.min(1, age * 3) * (1 - sm(seg(age, 1.9, 2.2)));
+      txt(g, x, y, 22, `rgba(255,220,140,${a})`, { font: KAI, shadow: 'rgba(255,190,80,0.9)', sb: 12 });
+    });
+    c.restore();
+    txt('周人以德配天 · 合法性来源向民间开放', 640, 68, 17, 'rgba(255,236,196,0.95)', { font: KAI, ls: 4, alpha: sm(seg(s, 3.0, 3.6)), shadow: 'rgba(0,0,0,0.8)', sb: 6 });
+  }
+  // —— C 利簋·大盂鼎 ——
+  if (gC > 0.01) {
+    c.globalAlpha = ga * gC;
+    c.fillStyle = '#080503'; c.fillRect(0, 0, W, H); glow(640, 280, 520, [170, 110, 40], 0.5);
+    const flash = Math.exp(-Math.max(0, t - EV.gui) * 5) * (t > EV.gui ? 1 : 0);
+    // 大盂鼎（背影）与「德」
+    txt('德', 330, 270, 280, `rgba(226,178,84,${0.12 + 0.12 * flash})`, { font: KAI, weight: 'bold' });
+    c.save(); c.translate(330, 372); c.fillStyle = 'rgba(120,90,40,0.5)';
+    c.beginPath(); c.moveTo(-95, -170); c.quadraticCurveTo(-120, -80, -85, -20); c.lineTo(85, -20); c.quadraticCurveTo(120, -80, 95, -170); c.closePath(); c.fill();
+    c.fillRect(-100, -176, 24, 22); c.fillRect(76, -176, 24, 22); [-70, 0, 70].forEach(x => c.fillRect(x - 11, -20, 22, 62)); c.restore();
+    // 利簋
+    const bx = 770, by = 330, sc = 1.15;
+    c.save(); c.translate(bx, by); c.scale(sc, sc);
+    const bg = c.createLinearGradient(-130, 0, 130, 0); bg.addColorStop(0, '#4c3c1c'); bg.addColorStop(0.35 + 0.15 * Math.sin(t * 1.2), '#d4ad58'); bg.addColorStop(1, '#4c3c1c');
+    c.fillStyle = bg; c.strokeStyle = '#1e1408'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(-135, -70); c.bezierCurveTo(-130, 20, -80, 55, 0, 58); c.bezierCurveTo(80, 55, 130, 20, 135, -70); c.closePath(); c.fill(); c.stroke();
+    c.beginPath(); c.ellipse(0, -70, 135, 16, 0, 0, TAU); c.fillStyle = '#2d200e'; c.fill(); c.stroke();
+    c.lineWidth = 9; c.strokeStyle = '#a98238'; c.beginPath(); c.arc(-150, -20, 30, -1.3, 1.5); c.stroke(); c.beginPath(); c.arc(150, -20, 30, 1.64, -1.8, true); c.stroke();
+    c.fillStyle = bg; c.fillRect(-90, 56, 180, 76); c.strokeStyle = '#1e1408'; c.lineWidth = 2; c.strokeRect(-90, 56, 180, 76);
+    c.save(); c.beginPath(); c.rect(-90, 56, 180, 76); c.clip(); meander(-90, 70, 180, 24, [40, 26, 10], 0.9); meander(-90, 100, 180, 24, [40, 26, 10], 0.9); c.restore();
+    c.save(); c.beginPath(); c.moveTo(-135, -70); c.bezierCurveTo(-130, 20, -80, 55, 0, 58); c.bezierCurveTo(80, 55, 130, 20, 135, -70); c.clip(); meander(-135, -40, 270, 22, [40, 26, 10], 0.85); c.restore();
+    c.restore();
+    glow(bx, by - 20, 260, [255, 200, 90], 0.25 + 0.45 * flash);
+    ['武王征商', '唯甲子朝', '岁鼎克昏', '夙有商'].forEach((col, i) => {
+      const a = sm(seg(s, 5.5 + i * 0.28, 5.9 + i * 0.28));
+      vtxt(col, 1040 - i * 48, 110, 28, `rgba(255,218,140,${a})`, { font: KAI, shadow: 'rgba(255,170,60,0.9)', sb: 10 });
+    });
+    txt('利簋 · 大盂鼎 · 铭文以德配天', 640, 70, 17, 'rgba(255,230,180,0.9)', { font: KAI, ls: 4 });
+    c.save(); c.globalCompositeOperation = 'lighter'; c.fillStyle = `rgba(255,220,150,${0.9 * flash})`; c.fillRect(0, 0, W, H); c.restore();
+  }
+  c.globalAlpha = ga;
+  const ca = sm(seg(s, 3.8, 4.4)) * (1 - sm(seg(s, 6.6, 7)));
+  cmpCard(40, 380, '周：以德配天，合法性来源向民间开放', '近东同期：王权多托庇神庙祭司', ca);
+}
+
+/* ---------- 第8章 印刷机前的中国式扩容 ---------- */
+function sc8(s, t) {
+  c.fillStyle = vgrad('#f0e2b4', '#b98f4c'); c.fillRect(0, 0, W, H);
+  // 远山水墨
+  mount(300, 110, 4, 'rgba(60,50,40,0.22)', t * 2, 0.004); mount(345, 80, 5, 'rgba(40,34,26,0.34)', t * 4, 0.005);
+  const gA = 1 - sm(seg(s, 3.1, 3.6)), gB = sm(seg(s, 3.2, 3.7)) * (1 - sm(seg(s, 5.0, 5.5))), gC = sm(seg(s, 5.1, 5.6));
+  const ga = c.globalAlpha, ink = '#2a1a0e';
+  // —— A 雕版印刷 ——
+  if (gA > 0.01) {
+    c.globalAlpha = ga * gA;
+    c.fillStyle = 'rgba(60,36,18,0.9)'; c.fillRect(0, 410, W, 140);
+    // 案台与雕版
+    c.fillStyle = '#5a3a1e'; c.fillRect(160, 392, 400, 18); c.fillRect(190, 410, 14, 100); c.fillRect(516, 410, 14, 100);
+    c.fillStyle = '#b5834a'; c.fillRect(230, 340, 260, 52); c.fillStyle = '#7a5530'; c.fillRect(230, 384, 260, 8);
+    [...'易書詩禮春秋'].forEach((g, i) => { const col = i % 3, row = (i / 3) | 0; c.save(); c.translate(262 + col * 85, 358 + row * 0); txt(g, 0, 0, 26, 'rgba(50,28,10,0.9)', { font: KAI, weight: 'bold' }); c.restore(); });
+    // 印纸飞向书架
+    EV.press.forEach((t0, i) => {
+      const a = t - t0; if (a < -0.3 || a > 1.2) return;
+      if (a < 0) { const u = sm((a + 0.3) / 0.3); c.fillStyle = '#fdf6df'; c.fillRect(250, 340 - 70 * (1 - u), 220, 50 + 0); }
+      else if (a < 0.25) { c.fillStyle = '#fdf6df'; c.fillRect(250, 336 + 4 * a, 220, 54); c.fillStyle = 'rgba(50,28,10,0.8)'; for (let k = 0; k < 6; k++) c.fillRect(268 + k * 34, 346, 18, 34); }
+      else { const u = eo((a - 0.25) / 0.95); const x = lerp(360, 800 + (i * 2) * 34, u), y = lerp(330, 290, u) - Math.sin(u * Math.PI) * 120, r = (u * 5 - 0.6) * 0.7;
+        c.save(); c.translate(x, y); c.rotate(r); c.fillStyle = '#fdf6df'; c.fillRect(-60, -34, 120, 68); c.fillStyle = 'rgba(50,28,10,0.75)'; for (let k = 0; k < 5; k++) c.fillRect(-48 + k * 22, -22, 10, 44); c.restore(); }
+    });
+    const press = pulse(t, 0.15, 0.7);
+    c.fillStyle = '#3b2412'; c.fillRect(300, 322 - press * 0, 120, 14 + press * 4);       // 棕刷
+    c.fillStyle = 'rgba(30,12,4,0.8)'; c.fillRect(330, 314 - 8 * press, 60, 8);
+    person(150, 470, 170, '#1a0e06', { hat: 1, aL: 1.6, aR: 0.8 }); flame(205, 388, 7, t, [255, 190, 90]);
+    // 九经书架
+    c.fillStyle = '#7c5530'; c.fillRect(740, 385, 400, 12); c.fillRect(750, 397, 10, 70); c.fillRect(1120, 397, 10, 70);
+    const bk = ['易', '书', '诗', '周礼', '仪礼', '礼记', '左传', '公羊', '谷梁'];
+    bk.forEach((g, j) => { const a = eo(seg(t, EV.books[j], EV.books[j] + 0.35)); if (a <= 0) return; const x = 756 + j * 42, h = 120 * a;
+      c.fillStyle = j % 2 ? '#7d2a20' : '#2f4f46'; c.fillRect(x, 385 - h, 36, h); c.fillStyle = 'rgba(240,220,170,0.9)'; c.fillRect(x + 4, 385 - h + 8, 28, 52 * a);
+      if (a > 0.9) vtxt(g.length > 1 ? g : g, x + 18, 385 - h + 22, g.length > 1 ? 13 : 17, '#2a1a0e', { font: KAI, sp: 1.05 }); });
+    txt('冯道主持 · 雕版刻印九经', 940, 310, 16, '#3a2410', { font: KAI, ls: 3, alpha: sm(seg(t, 11.2, 11.8)) });
+    seal(1160, 330, '官刻', 34, CIN, sm(seg(t, 12.6, 13)));
+  }
+  // —— B 占城稻与农业剩余 ——
+  if (gB > 0.01) {
+    c.globalAlpha = ga * gB;
+    const g = seg(t, 13.4, 15.2); glow(220, 150, 260, [255, 220, 130], 0.8); c.fillStyle = '#fff6d2'; c.beginPath(); c.arc(220, 150, 34, 0, TAU); c.fill();
+    for (let b = 0; b < 6; b++) {
+      const y0 = 250 + b * 42; c.beginPath(); c.moveTo(-10, y0 + 40); c.quadraticCurveTo(300 + b * 40, y0 - 30 + b * 4, 700, y0 + 6); c.quadraticCurveTo(1000, y0 + 30, W + 10, y0 - 20); c.lineTo(W + 10, y0 + 60); c.lineTo(-10, y0 + 60); c.closePath();
+      const col = mix([88, 140, 70], [214, 170, 62], clamp(g * 1.4 - b * 0.08)); c.fillStyle = rgba(col, 0.96); c.fill();
+      c.strokeStyle = 'rgba(40,60,30,0.35)'; c.lineWidth = 1.4; c.stroke();
+      for (let k = 0; k < 70; k++) { const x = (k / 70) * W + (b % 2) * 8, y = y0 + 20 + Math.sin(x * 0.011 + b) * 12 - (g * 12) * R(k, b); const h = (6 + g * 16) * (0.6 + R(k, b + 3));
+        c.strokeStyle = rgba(mix([60, 110, 45], [190, 140, 40], g), 0.9); c.lineWidth = 1.2; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + 3 + Math.sin(t * 2 + k) * 2, y - h * 0.6, x + 6 + Math.sin(t * 2 + k) * 3, y - h); c.stroke(); }
+    }
+    person(900, 440, 90, '#1a0e06', { aL: 1.9, aR: 0.6, hat: 1 }); person(980, 450, 80, '#1a0e06', { aL: 0.6, aR: 1.9, hat: 1 });
+    // 稻谷堆
+    for (let k = 0; k < 18; k++) { const a = eo(seg(t, 14.0 + k * 0.06, 14.5 + k * 0.06)); const x = 1080 + (k % 6) * 22 - (k / 6 | 0) * 10, y = 480 - (k / 6 | 0) * 18; c.fillStyle = `rgba(220,176,70,${a})`; c.beginPath(); c.ellipse(x, y, 11, 8, 0, 0, TAU); c.fill(); c.strokeStyle = `rgba(120,80,20,${a})`; c.stroke(); }
+    txt('占城稻 · 江东犁 · 农业剩余抬升', 640, 70, 17, '#3a2410', { font: KAI, ls: 4, alpha: sm(seg(t, 13.5, 14)) });
+  }
+  // —— C 科举取士·汴京·交子 ——
+  if (gC > 0.01) {
+    c.globalAlpha = ga * gC;
+    // 远塔与城
+    for (let k = 0; k < 4; k++) { const x = 120 + k * 300; c.fillStyle = 'rgba(40,30,22,0.35)'; for (let l = 0; l < 6; l++) c.fillRect(x - 24 + l * 3, 300 - l * 18, 48 - l * 6, 12); }
+    // 号舍
+    for (let r = 0; r < 4; r++) for (let k = 0; k < 14; k++) { const x = 90 + k * 40 + r * 14, y = 392 + r * 26, lit = R(k + r * 17) < seg(t, 15.4, 17.2) ? 1 : 0; c.fillStyle = '#2a1a0e'; c.fillRect(x, y, 32, 18); c.fillStyle = lit ? 'rgba(255,200,100,0.9)' : 'rgba(100,70,40,0.5)'; c.fillRect(x + 8, y + 6, 16, 8); c.fillStyle = '#4a2c14'; c.beginPath(); c.moveTo(x - 4, y); c.lineTo(x + 16, y - 10); c.lineTo(x + 36, y); c.closePath(); c.fill(); }
+    // 金榜
+    const bu = eo(seg(t, EV.bang - 0.2, EV.bang + 0.7)), bh = 270 * bu;
+    c.fillStyle = '#c9392b'; c.fillRect(540, 120, 200, bh); c.strokeStyle = '#e8c06a'; c.lineWidth = 4; c.strokeRect(540, 120, 200, bh);
+    c.fillStyle = '#4a2c14'; c.fillRect(530, 112, 220, 10);
+    if (bu > 0.7) { vtxt('金榜题名', 640, 142, 25, '#f7dca0', { font: KAI, weight: 'bold' }); ['状元', '榜眼', '探花'].forEach((n, i) => { vtxt(n, 580 + i * 40, 292, 17, '#f7dca0', { font: KAI }); vtxt('某某某', 580 + i * 40, 338, 12, 'rgba(247,220,160,0.8)', { font: KAI }); }); }
+    const flashB = Math.exp(-Math.max(0, t - EV.bang) * 4) * (t > EV.bang ? 1 : 0); glow(640, 220, 360, [255, 220, 130], 0.5 * flashB);
+    // 取士规模柱
+    for (let k = 0; k < 8; k++) { const a = eo(seg(t, EV.bang + 0.3 + k * 0.1, EV.bang + 0.9 + k * 0.1)); const h = (30 + k * 26) * a; c.fillStyle = rgba(CIN, 0.92); c.fillRect(800 + k * 38, 300 - h + 90, 26, h); c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(800 + k * 38 + 20, 300 - h + 90, 6, h); }
+    txt('取士规模扩容 · 学而优则仕', 940, 112, 15, '#3a2410', { font: KAI, ls: 2, alpha: sm(seg(t, 15.8, 16.3)) });
+    // 交子
+    const ja = sm(seg(t, 16.4, 16.9)); if (ja > 0) { c.save(); c.translate(240, 210 + Math.sin(t * 2) * 6); c.rotate(-0.14 + Math.sin(t * 1.5) * 0.05); c.globalAlpha *= ja; c.fillStyle = '#efe0b6'; c.fillRect(-90, -55, 180, 110); c.strokeStyle = '#6a3a1a'; c.lineWidth = 3; c.strokeRect(-90, -55, 180, 110); c.strokeRect(-80, -45, 160, 90); txt('交子', 0, -8, 38, '#8c1e16', { font: KAI, weight: 'bold' }); txt('官交子 · 铁钱十贯', 0, 30, 13, '#4a2c14', { font: KAI }); c.restore(); }
+  }
+  c.globalAlpha = ga;
+  const ca = sm(seg(s, 1.4, 2)) * (1 - sm(seg(s, 7.4, 7.9)));
+  cmpCard(40, 380, '宋刻本、科举取士：社会流动制度化', '古登堡约1450 · 宗教改革1517：晚数百年', ca, 360);
+  if (t > EV.press[0]) c.globalAlpha = ga;
+}
+
+/* ---------- 第9章 精准的保守主义 ---------- */
+function sc9(s, t) {
+  c.fillStyle = vgrad('#0e1216', '#2b3139'); c.fillRect(0, 0, W, H);
+  const flashS = Math.exp(-Math.max(0, t - EV.stamp) * 6) * (t > EV.stamp ? 1 : 0);
+  // 东：封禁
+  c.save(); c.beginPath(); c.rect(0, 0, 640, H); c.clip();
+  mount(330, 90, 7, 'rgba(60,70,80,0.45)', 0, 0.005);
+  c.fillStyle = vgrad('#122028', '#050a0e', 380, H); c.fillRect(0, 380, 640, H);
+  c.strokeStyle = 'rgba(120,150,170,0.25)'; c.lineWidth = 1; for (let k = 0; k < 8; k++) { c.beginPath(); for (let x = 0; x <= 640; x += 12) { const y = 392 + k * 18 + Math.sin(x * 0.03 + t * 1.3 + k) * 3; x ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); }
+  for (let k = 0; k < 4; k++) { const x = 90 + k * 140 + Math.sin(t * 0.8 + k) * 4, y = 400 + (k % 2) * 28 + Math.sin(t * 1.1 + k) * 2;
+    c.fillStyle = '#05080b'; c.beginPath(); c.moveTo(x - 50, y); c.lineTo(x + 50, y); c.lineTo(x + 36, y + 14); c.lineTo(x - 40, y + 14); c.closePath(); c.fill();
+    c.fillRect(x - 1, y - 85, 2, 85); for (let l = 0; l < 4; l++) { c.beginPath(); c.moveTo(x + 2, y - 80 + l * 20); c.quadraticCurveTo(x + 36, y - 74 + l * 20, x + 40, y - 62 + l * 20 + 4); c.lineTo(x + 2, y - 62 + l * 20); c.closePath(); c.fillStyle = 'rgba(40,36,30,0.9)'; c.fill(); }
+    glow(x - 38, y - 4, 12, [255, 150, 60], 0.55); }
+  // 铁锁
+  const cu = seg(t, EV.chain - 0.4, EV.chain), drop = (1 - ei(cu)) * -160 + Math.exp(-Math.max(0, t - EV.chain) * 6) * Math.sin((t - EV.chain) * 30) * 6;
+  if (t > EV.chain - 0.4) { c.save(); c.translate(0, drop); c.strokeStyle = '#7d8790'; c.lineWidth = 4; for (let k = 0; k < 24; k++) { const x = 40 + k * 24, y = 372 + Math.sin(k / 23 * Math.PI) * 18; c.beginPath(); c.ellipse(x, y, 9, 5, 0, 0, TAU); c.stroke(); } c.restore(); }
+  // 诏书
+  const un = eo(seg(t, 18.6, 19.2)), sh = 240 * un, sx = 160, sy = 134;
+  c.fillStyle = '#d6a73a'; c.fillRect(sx, sy, 300, sh); c.strokeStyle = '#7a4c14'; c.lineWidth = 5; c.strokeRect(sx, sy, 300, sh);
+  c.fillStyle = '#5a3414'; c.fillRect(sx - 8, sy - 8, 316, 12); c.fillRect(sx - 8, sy + sh - 4, 316, 12);
+  if (un > 0.9) {
+    c.save(); c.beginPath(); c.rect(sx, sy, 300, sh); c.clip(); meander(sx + 10, sy + 14, 280, 14, [120, 60, 20], 0.7); meander(sx + 10, sy + sh - 32, 280, 14, [120, 60, 20], 0.7); c.restore();
+    vtxt('奉天承运', sx + 244, sy + 44, 22, '#3a1a08', { font: KAI, weight: 'bold' }); vtxt('皇帝诏曰', sx + 206, sy + 44, 22, '#3a1a08', { font: KAI, weight: 'bold' });
+    vtxt('海疆有禁通商一口', sx + 150, sy + 44, 19, '#4a2410', { font: KAI, sp: 1.1 }); vtxt('违者严惩不贷', sx + 100, sy + 44, 17, '#4a2410', { font: KAI, sp: 1.1 });
+  }
+  const sa = clamp((t - EV.stamp) / 0.12);
+  if (t > EV.stamp - 0.02) { const k = lerp(2.6, 1, eo(sa)); c.save(); c.translate(sx + 50, sy + 198); c.rotate(-0.12); c.scale(k * 0.82, k * 0.82); c.globalAlpha *= sa; c.fillStyle = 'rgba(190,34,26,0.96)'; c.fillRect(-42, -42, 84, 84); c.strokeStyle = '#f0d8b8'; c.lineWidth = 3; c.strokeRect(-36, -36, 72, 72); txt('禁', 0, 3, 66, '#f6e3c8', { font: KAI, weight: 'bold' }); c.restore(); }
+  c.restore();
+  // 西：蒸汽与工厂
+  c.save(); c.beginPath(); c.rect(640, 0, 640, H); c.clip();
+  const up = sm(seg(s, 1.5, 6));
+  glow(930, 330, 420, [255, 120, 40], 0.18 + 0.5 * up);
+  mount(380, 80, 9, 'rgba(70,40,30,0.55)', 0, 0.006);
+  c.fillStyle = '#0a0706'; c.fillRect(640, 420, 640, 130);
+  for (let k = 0; k < 6; k++) { const x = 700 + k * 100, h = 120 + (k % 3) * 40; c.fillStyle = '#0c0807'; c.fillRect(x, 420 - h, 44, h); c.fillRect(x - 6, 420 - h, 56, 10);
+    for (let p = 0; p < 6; p++) { const age = (t * 0.6 + p / 6 + k * 0.13) % 1, px = x + 22 + age * 60 + Math.sin(age * 6 + k) * 10, py = 420 - h - age * 150, r = 10 + age * 30; c.fillStyle = `rgba(60,56,54,${0.5 * (1 - age)})`; c.beginPath(); c.arc(px, py, r, 0, TAU); c.fill(); }
+    for (let w = 0; w < 4; w++) { c.fillStyle = `rgba(255,170,70,${0.4 + 0.5 * R(k * 4 + w)})`; c.fillRect(x + 6 + (w % 2) * 20, 420 - h + 26 + (w >> 1) * 28, 12, 14); } }
+  // 飞轮与连杆
+  const spd = lerp(1, 7, up), ang = t * spd * 0.35 + s * 0; const gx = 960, gy = 360;
+  c.save(); c.translate(gx, gy); c.rotate(ang); c.strokeStyle = '#d9a35a'; c.lineWidth = 7; c.beginPath(); c.arc(0, 0, 64, 0, TAU); c.stroke(); c.lineWidth = 4; for (let k = 0; k < 8; k++) { c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(k * TAU / 8) * 64, Math.sin(k * TAU / 8) * 64); c.stroke(); }
+  for (let k = 0; k < 24; k++) { c.save(); c.rotate(k * TAU / 24); c.fillStyle = '#c2863c'; c.fillRect(62, -4, 12, 8); c.restore(); } c.restore();
+  const px = gx + Math.cos(ang) * 40, py = gy + Math.sin(ang) * 40; c.strokeStyle = '#b98a52'; c.lineWidth = 6; c.beginPath(); c.moveTo(px, py); c.lineTo(px + 150, 360); c.stroke(); c.fillStyle = '#8a6a40'; c.fillRect(px + 130 + Math.sin(ang) * 0, 345, 60, 30);
+  // 铁路与机车
+  c.strokeStyle = 'rgba(200,170,130,0.6)'; c.lineWidth = 2; c.beginPath(); c.moveTo(1000, 430); c.lineTo(1280, 520); c.moveTo(1040, 430); c.lineTo(1330, 520); c.stroke();
+  const tx = lerp(700, 1220, (t * 0.2) % 1); c.fillStyle = '#080605'; c.fillRect(tx, 452, 70, 22); c.fillRect(tx + 8, 436, 18, 16); c.fillRect(tx + 44, 440, 20, 12); c.fillStyle = 'rgba(255,220,160,0.7)'; c.beginPath(); c.arc(tx + 66, 462, 4, 0, TAU); c.fill();
+  txt('1769 瓦特 · 蒸汽与工厂 · 点火成势', 960, 80, 16, '#f0c890', { font: KAI, ls: 3, alpha: sm(seg(s, 2, 2.6)) });
+  c.restore();
+  // 中缝
+  c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(638, 0, 4, H);
+  // 流动性折价表盘
+  const da = sm(seg(s, 3.2, 3.8)); if (da > 0) { c.save(); c.globalAlpha *= da; c.translate(640, 150);
+    c.fillStyle = 'rgba(8,10,12,0.8)'; c.beginPath(); c.arc(0, 0, 62, Math.PI, 0); c.lineTo(62, 14); c.lineTo(-62, 14); c.closePath(); c.fill(); c.strokeStyle = rgba(GOLD, 0.7); c.lineWidth = 1.2; c.stroke();
+    for (let k = 0; k <= 10; k++) { const a = Math.PI + k / 10 * Math.PI; c.strokeStyle = k > 6 ? '#d4503c' : '#c9a860'; c.lineWidth = 1.6; c.beginPath(); c.moveTo(Math.cos(a) * 52, Math.sin(a) * 52); c.lineTo(Math.cos(a) * 60, Math.sin(a) * 60); c.stroke(); }
+    const na = Math.PI + lerp(0.15, 0.9, sm(seg(s, 3.4, 5.2))) * Math.PI + Math.sin(t * 22) * 0.015; c.strokeStyle = '#f0d8a8'; c.lineWidth = 2.4; c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(na) * 50, Math.sin(na) * 50); c.stroke(); c.fillStyle = '#f0d8a8'; c.beginPath(); c.arc(0, 0, 4, 0, TAU); c.fill();
+    txt('流动性折价', 0, -30, 12, '#e8cf9a', { font: KAI, ls: 2 }); txt('点火概率 ↓', 0, 30, 12, '#e8a090', { font: KAI }); c.restore(); }
+  c.fillStyle = `rgba(255,240,220,${0.55 * flashS})`; c.fillRect(0, 0, W, H);
+  // 雨
+  c.strokeStyle = 'rgba(170,190,210,0.2)'; c.lineWidth = 1; c.beginPath(); for (let k = 0; k < 150; k++) { const x = (R(k) * W * 1.2 + t * 70) % (W + 50) - 25, y = (R(k, 1) * H + t * 520 * (0.7 + R(k, 2) * 0.6)) % H; c.moveTo(x, y); c.lineTo(x - 5, y + 16); } c.stroke();
+  const ca = sm(seg(s, 3.4, 4)) * (1 - sm(seg(s, 6.5, 7)));
+  cmpCard(40, 380, '中：封禁诏书 · 精准保守，航道愈窄', '西：蒸汽工厂点火，第三次大分流', ca, 340);
+}
+/* ===== 分镜 · 第10章、第11章、第12章 ===== */
+const CHINA = [[73.5,39.5],[76,40.5],[80,42],[80.5,45],[83,47],[85.5,47.2],[87.5,49],[90,47.7],[91,45.5],[95,44.5],[97,42.7],[101,42.5],[105,41.8],[110,42.5],[112,45],[116,46.5],[118,47.5],[119.5,50],[121,53.3],[124.5,53.5],[127,50.2],[130,48.8],[133.5,48.2],[134.7,47.5],[133,45],[131,43],[129.5,42.5],[127,41.5],[124.3,40],[122,39.5],[121.5,38.8],[122.3,37.4],[120.5,36.2],[119.3,35],[121.8,32.8],[121.9,31.2],[121.5,29.5],[120,26.5],[117.5,23.8],[114.5,22.3],[111,21.5],[109.7,21.5],[108,21.6],[106.5,22.3],[105,23],[102.5,22.7],[101,21.3],[98.7,24],[97.5,28],[96,29],[92,27.8],[88.8,27.3],[85,28.3],[81.5,30.2],[79,32.5],[78.5,35],[75.5,37],[74.5,38.5]];
+const mapXY = (lon, lat, ox, oy, k) => [ox + (lon - 104) * k, oy - (lat - 36) * k * 1.12];
+
+function gear(x, y, r, teeth, ang, col, hub) {
+  c.save(); c.translate(x, y); c.rotate(ang);
+  c.beginPath(); for (let i = 0; i < teeth * 2; i++) { const a = i / (teeth * 2) * TAU, rr = i % 2 ? r : r * 1.14, a2 = (i + 1) / (teeth * 2) * TAU; c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); c.lineTo(Math.cos(a2 - 0.02) * rr, Math.sin(a2 - 0.02) * rr); }
+  c.closePath(); const g = c.createRadialGradient(0, 0, r * 0.2, 0, 0, r * 1.1); g.addColorStop(0, col[0]); g.addColorStop(1, col[1]); c.fillStyle = g; c.fill();
+  c.strokeStyle = 'rgba(20,10,4,0.8)'; c.lineWidth = 2; c.stroke();
+  c.beginPath(); c.arc(0, 0, r * 0.62, 0, TAU); c.strokeStyle = 'rgba(30,14,6,0.6)'; c.lineWidth = 2; c.stroke();
+  c.beginPath(); c.arc(0, 0, r * 0.22, 0, TAU); c.fillStyle = 'rgba(20,10,4,0.85)'; c.fill();
+  c.lineWidth = 3; for (let k = 0; k < 6; k++) { c.beginPath(); c.moveTo(Math.cos(k * TAU / 6) * r * 0.22, Math.sin(k * TAU / 6) * r * 0.22); c.lineTo(Math.cos(k * TAU / 6) * r * 0.62, Math.sin(k * TAU / 6) * r * 0.62); c.strokeStyle = 'rgba(30,14,6,0.55)'; c.stroke(); }
+  if (hub) { c.rotate(-ang); txt(hub, 0, 0, r * 0.3, '#f3d89a', { font: KAI, weight: 'bold' }); }
+  c.restore();
+}
+function handprint(x, y, r, a) {
+  c.save(); c.translate(x, y); c.rotate(r); c.fillStyle = `rgba(185,30,24,${a})`;
+  c.beginPath(); c.ellipse(0, 6, 14, 17, 0, 0, TAU); c.fill();
+  for (let i = 0; i < 5; i++) { const an = -2.5 + i * 0.5 + (i === 0 ? -0.25 : 0), L = i === 0 ? 14 : 20 - Math.abs(i - 2) * 2; c.beginPath(); c.ellipse(Math.cos(an) * 17, 2 + Math.sin(an) * 17 - (i === 0 ? 0 : 3), 4, L * 0.55, an + Math.PI / 2, 0, TAU); c.fill(); }
+  c.restore();
+}
+
+/* ---------- 第10章 同一台机器的两次换挡 ---------- */
+function sc10(s, t) {
+  const dawn = sm(seg(s, 0, 7)); c.fillStyle = vgrad(rgba(mix([34, 12, 10], [60, 16, 14], dawn)), rgba(mix([90, 24, 14], [196, 70, 34], dawn))); c.fillRect(0, 0, W, H);
+  const gA = 1 - sm(seg(s, 2.8, 3.3)), gB = sm(seg(s, 2.9, 3.4)) * (1 - sm(seg(s, 4.9, 5.4))), gC = sm(seg(s, 5.0, 5.5));
+  const ga = c.globalAlpha;
+  // —— A 准据换挡：同一台机器 ——
+  if (gA > 0.01) {
+    c.globalAlpha = ga * gA;
+    const sh1 = sm(seg(t, EV.shift[0], EV.shift[0] + 0.4)), sh2 = sm(seg(t, EV.shift[1], EV.shift[1] + 0.4));
+    const speed = 0.3 + sh1 * 0.9 + sh2 * 1.6; const ang = (s < 0 ? 0 : s) * speed + (sh1 + sh2) * 2;
+    glow(640, 290, 420, [255, 150, 60], 0.35 + 0.3 * pulse(t, 0.25));
+    gear(560, 290, 120, 18, ang, ['#e0a64e', '#6b4318'], '准据');
+    gear(560 + 120 * 1.07 + 70, 290 - 20, 70, 11, -ang * 120 / 70 + 0.2, ['#d58a3a', '#5c3414'], '');
+    gear(560 - 120 * 1.07 - 55, 290 + 40, 55, 9, -ang * 120 / 55 + 0.1, ['#c97b3a', '#52300f'], '');
+    // 变速杆
+    c.save(); c.translate(920, 360); c.fillStyle = 'rgba(10,6,4,0.7)'; c.fillRect(-60, -30, 120, 150); c.strokeStyle = rgba(GOLD, 0.7); c.strokeRect(-60, -30, 120, 150);
+    ['Ⅲ', 'Ⅱ', 'Ⅰ'].forEach((n, i) => { txt(n, -38, 10 + i * 42, 20, '#e9cf98', { font: KAI }); c.fillStyle = 'rgba(255,255,255,0.1)'; c.fillRect(-20, 4 + i * 42, 70, 14); });
+    const pos = 2 - (sh1 + sh2) * 1; const ly = 10 + pos * 42; c.strokeStyle = '#c9a050'; c.lineWidth = 8; c.lineCap = 'round'; c.beginPath(); c.moveTo(10, 120); c.lineTo(10 + (pos - 1) * 4, ly); c.stroke(); c.fillStyle = '#b32a1e'; c.beginPath(); c.arc(10 + (pos - 1) * 4, ly, 12, 0, TAU); c.fill(); c.restore();
+    // 档案
+    [[EV.shift[0], 1000, 190, '1949'], [EV.shift[1], 1120, 250, '1978']].forEach(([t0, x, y, yr]) => { const a = eo(seg(t, t0, t0 + 0.5)); if (a <= 0) return;
+      c.save(); c.translate(x, y + (1 - a) * 40); c.rotate(0.08 * (yr === '1949' ? -1 : 1)); c.globalAlpha *= a; c.fillStyle = '#e8d6a6'; c.fillRect(-52, -66, 104, 132); c.strokeStyle = '#6a4a24'; c.lineWidth = 2; c.strokeRect(-52, -66, 104, 132);
+      for (let k = 0; k < 6; k++) { c.fillStyle = 'rgba(70,44,20,0.5)'; c.fillRect(-40, -44 + k * 14, 80 - (k % 3) * 14, 3); }
+      txt(yr, 0, -50 + 0, 24, '#8c1e16', { font: KAI, weight: 'bold' }); txt('档案', 0, 52, 14, '#4a2c14', { font: KAI }); seal(26, 28, '换挡', 24, CIN); c.restore(); });
+    txt('准据换挡：1949 · 1978', 640, 70, 18, '#f4d9a0', { font: KAI, ls: 5, alpha: sm(seg(s, 0.6, 1.2)), shadow: 'rgba(0,0,0,0.7)', sb: 6 });
+    const yr = sh2 > 0.5 ? '1978' : sh1 > 0.5 ? '1949' : ''; if (yr) txt(yr, 560, 440, 54, 'rgba(255,230,170,0.92)', { font: KAI, weight: 'bold', shadow: 'rgba(0,0,0,0.6)', sb: 8 });
+  }
+  // —— B 小岗村红手印 ——
+  if (gB > 0.01) {
+    c.globalAlpha = ga * gB;
+    c.fillStyle = vgrad('#1a0d08', '#3b2012'); c.fillRect(0, 0, W, H); glow(640, 240, 480, [255, 170, 80], 0.5 + 0.1 * Math.sin(t * 14));
+    c.fillStyle = '#2a170c'; c.fillRect(0, 430, W, 120);
+    c.save(); c.translate(640, 255); c.rotate(-0.015); c.fillStyle = '#e9d7a8'; c.fillRect(-330, -170, 660, 340); c.strokeStyle = '#7a5a30'; c.lineWidth = 2; c.strokeRect(-330, -170, 660, 340);
+    c.fillStyle = 'rgba(120,90,50,0.1)'; for (let k = 0; k < 30; k++) c.fillRect(-330 + R(k) * 660, -170 + R(k, 1) * 340, 40, 2);
+    vtxt('大包干契约', -280, -140, 24, '#3a1a08', { font: KAI, weight: 'bold' });
+    ['我们分田到户', '每户户主签字盖章', '如不成我们干部', '坐牢杀头也干', '社员保证把我们的', '小孩养活到十八岁'].forEach((l, i) => vtxt(l, 255 - i * 44, -150, 19, '#3a1a08', { font: KAI, sp: 1.08 }));
+    for (let i = 0; i < 18; i++) { const t0 = EV.hand0 + i * EV.handDt; if (t < t0) continue; const a = clamp((t - t0) / 0.06), col = i % 6, row = (i / 6) | 0;
+      handprint(-210 + col * 76 + (R(i) - 0.5) * 12, 58 + row * 52 + (R(i, 1) - 0.5) * 6, (R(i, 2) - 0.5) * 0.5, 0.88 * a); }
+    c.restore();
+    txt('1978 · 凤阳小岗村 · 试点授权，容错默许', 640, 70, 18, '#f6dca4', { font: KAI, ls: 4, alpha: sm(seg(s, 3.2, 3.8)), shadow: 'rgba(0,0,0,0.7)', sb: 6 });
+    flame(120, 380, 10, t, [255, 190, 90]); flame(1160, 380, 10, t + 1.3, [255, 190, 90]);
+  }
+  // —— C 复制推广：星火成势 ——
+  if (gC > 0.01) {
+    c.globalAlpha = ga * gC;
+    c.fillStyle = vgrad('#1d0a0a', '#7a2214'); c.fillRect(0, 0, W, H);
+    const ox = 640, oy = 300, k = 7.6, p0 = mapXY(117, 32.8, ox, oy, k), p1 = mapXY(114, 22.5, ox, oy, k);
+    c.beginPath(); CHINA.forEach(([lo, la], i) => { const p = mapXY(lo, la, ox, oy, k); i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); }); c.closePath();
+    c.fillStyle = 'rgba(20,6,6,0.75)'; c.fill(); c.strokeStyle = rgba(GOLD, 0.8); c.lineWidth = 1.6; c.stroke();
+    const u = seg(t, EV.spread, 32.0);
+    // 城点（确定性分布，向外扩散点亮）
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 220; i++) {
+      const lo = 98 + R(i) * 30, la = 22 + R(i, 1) * 24; let inside = false; for (let a = 0, b = CHINA.length - 1; a < CHINA.length; b = a++) { const [xi, yi] = CHINA[a], [xj, yj] = CHINA[b]; if (((yi > la) !== (yj > la)) && lo < (xj - xi) * (la - yi) / (yj - yi) + xi) inside = !inside; }
+      if (!inside) continue; const p = mapXY(lo, la, ox, oy, k); const d = Math.min(Math.hypot(p[0] - p0[0], p[1] - p0[1]), Math.hypot(p[0] - p1[0], p[1] - p1[1])) / 520; const a = sm((u * 1.3 - d) * 6); if (a <= 0) continue;
+      const rr = 1.5 + R(i, 2) * 2.5; glow(p[0], p[1], rr * 4, [255, 190, 90], 0.8 * a); c.fillStyle = `rgba(255,236,190,${a})`; c.fillRect(p[0] - 1, p[1] - 1, 2, 2);
+    }
+    [p0, p1].forEach(p => { const age = t - EV.spread; for (let r = 0; r < 4; r++) { const a = ((age * 0.9 + r * 0.25) % 1); c.strokeStyle = `rgba(255,200,110,${0.7 * (1 - a)})`; c.lineWidth = 2; c.beginPath(); c.arc(p[0], p[1], a * 300, 0, TAU); c.stroke(); } glow(p[0], p[1], 40, [255, 220, 140], 0.9); });
+    c.restore();
+    txt('凤阳', p0[0] + 18, p0[1] - 12, 13, '#ffe6b0', { font: KAI, align: 'left' }); txt('深圳', p1[0] + 16, p1[1] + 8, 13, '#ffe6b0', { font: KAI, align: 'left' });
+    // 城市天际线
+    for (let i = 0; i < 26; i++) { const h = (20 + R(i) * 90) * eo(seg(t, 30.4 + i * 0.03, 31.5)); const x = 20 + i * 14; c.fillStyle = 'rgba(14,6,6,0.9)'; c.fillRect(x, H - 50 - h, 11, h); c.fillStyle = 'rgba(255,200,110,0.6)'; for (let w = 0; w < h / 9; w++) if (R(i, w) > 0.4) c.fillRect(x + 2 + (w % 2) * 4, H - 50 - h + 4 + w * 8, 2, 3); }
+    for (let i = 0; i < 26; i++) { const h = (20 + R(i, 7) * 90) * eo(seg(t, 30.4 + i * 0.03, 31.5)); const x = W - 20 - 11 - i * 14; c.fillStyle = 'rgba(14,6,6,0.9)'; c.fillRect(x, H - 50 - h, 11, h); }
+    txt('复制推广 · 星火成势 · 追赶启动', 640, 70, 18, '#f9dba0', { font: KAI, ls: 4, alpha: sm(seg(s, 5.3, 5.9)), shadow: 'rgba(0,0,0,0.7)', sb: 6 });
+  }
+  c.globalAlpha = ga;
+  cmpCard(40, 380, '中：准据换挡 + 试点授权 → 追赶', '西：战后增长转缓，慢变量固化', sm(seg(s, 0.8, 1.4)) * (1 - sm(seg(s, 6.5, 7))), 340);
+}
+
+/* ---------- 第11章 欧洲这面镜子 ---------- */
+function sc11(s, t) {
+  c.fillStyle = vgrad('#140606', '#4a1612'); c.fillRect(0, 0, W, H);
+  const mx = 640, my = 262, rr = 160;
+  glow(mx, my, 420, [255, 160, 70], 0.28 + 0.2 * pulse(t, 0.3));
+  // 六枚徽记环绕：六种政体构型
+  const six = ['战争仿效', '重商顶层', '点火偶然', '政治分立', '法典移植', '明治维新'];
+  six.forEach((n, i) => {
+    const a = -Math.PI / 3 + i * TAU / 6 + Math.sin(s * 0.6) * 0.06, x = mx + Math.cos(a) * 340, y = my + Math.sin(a) * 158, al = sm(seg(s, 0.2 + i * 0.12, 0.7 + i * 0.12));
+    c.save(); c.globalAlpha *= al; c.translate(x, y); c.fillStyle = 'rgba(14,6,6,0.75)'; c.beginPath(); c.arc(0, 0, 38, 0, TAU); c.fill(); c.strokeStyle = rgba(GOLD, 0.85); c.lineWidth = 2; c.stroke(); c.beginPath(); c.arc(0, 0, 32, 0, TAU); c.lineWidth = 0.8; c.stroke();
+    txt(n.slice(0, 2), 0, -11, 18, '#f0d9a2', { font: KAI, ls: 2 }); txt(n.slice(2), 0, 11, 18, '#f0d9a2', { font: KAI, ls: 2 }); c.restore();
+  });
+  // 铜镜
+  const fl0 = EV.flip.reduce((a, t0) => a + (t > t0 ? 1 : 0), 0), flip = EV.flip.reduce((a, t0) => a + (t > t0 + 0.2 ? 1 : 0), 0), since = t - (EV.flip[Math.max(0, fl0 - 1)] || -9), fa = fl0 > 0 && since < 0.4 ? Math.abs(Math.cos(clamp(since / 0.4) * Math.PI)) : 1;
+  c.save(); c.translate(mx, my);
+  const bg = c.createRadialGradient(-40, -50, 20, 0, 0, rr); bg.addColorStop(0, '#e6c36c'); bg.addColorStop(0.7, '#a37a2c'); bg.addColorStop(1, '#5a3d12'); c.fillStyle = bg; c.beginPath(); c.arc(0, 0, rr, 0, TAU); c.fill();
+  c.strokeStyle = '#2a1706'; c.lineWidth = 4; c.stroke(); c.lineWidth = 1.2; for (let r = 1; r <= 3; r++) { c.beginPath(); c.arc(0, 0, rr - r * 9, 0, TAU); c.strokeStyle = 'rgba(40,22,6,0.55)'; c.stroke(); }
+  c.save(); c.rotate(s * 0.15); for (let k = 0; k < 24; k++) { c.rotate(TAU / 24); c.fillStyle = 'rgba(60,34,10,0.55)'; c.fillRect(rr - 26, -4, 14, 8); } c.restore();
+  // 镜面：映像（欧洲 / 移植 / 再定型）
+  c.save(); c.beginPath(); c.arc(0, 0, rr - 34, 0, TAU); c.clip(); c.scale(1, fa * 0.92 + 0.08);
+  c.fillStyle = vgrad('#cfe3ee', '#78a0b8', -rr, rr); c.fillRect(-rr, -rr, rr * 2, rr * 2);
+  const k0 = Math.min(3, flip);
+  if (k0 === 0 || k0 === 1) { // 哥特式教堂 + 拿破仑法典
+    c.fillStyle = '#2a3744'; c.fillRect(-70, -20, 140, 130); c.fillRect(-92, 20, 30, 90); c.fillRect(62, 20, 30, 90);
+    [-52, 52].forEach(x => { c.beginPath(); c.moveTo(x - 22, -20); c.lineTo(x, -125); c.lineTo(x + 22, -20); c.closePath(); c.fill(); }); c.beginPath(); c.moveTo(-14, -20); c.lineTo(0, -80); c.lineTo(14, -20); c.fill();
+    c.fillStyle = '#cfe3ee'; c.beginPath(); c.arc(0, 20, 20, 0, TAU); c.fill(); c.fillRect(-8, 40, 16, 60);
+    if (k0 === 1) { c.fillStyle = '#7d2a20'; c.fillRect(-60, 70, 120, 56); c.fillStyle = '#f1e2b8'; c.fillRect(-52, 76, 104, 44); txt('CODE CIVIL', 0, 90, 12, '#3a2410', { font: 'serif', weight: 'bold' }); txt('1804', 0, 108, 14, '#3a2410', { font: 'serif', weight: 'bold' }); }
+  } else { // 明治：旭日与鸟居
+    c.fillStyle = '#d6402e'; c.beginPath(); c.arc(0, -20, 62, 0, TAU); c.fill(); for (let k = 0; k < 16; k++) { c.strokeStyle = 'rgba(214,64,46,0.55)'; c.lineWidth = 4; c.beginPath(); c.moveTo(Math.cos(k * TAU / 16) * 72, -20 + Math.sin(k * TAU / 16) * 72); c.lineTo(Math.cos(k * TAU / 16) * 120, -20 + Math.sin(k * TAU / 16) * 120); c.stroke(); }
+    c.fillStyle = '#b8261a'; c.fillRect(-80, 40, 160, 12); c.fillRect(-70, 56, 140, 8); c.fillRect(-60, 52, 14, 70); c.fillRect(46, 52, 14, 70);
+    txt('1868', 0, 120, 18, '#2a1a0e', { font: 'serif', weight: 'bold' });
+  }
+  glow(-60 + ((t * 40) % 220), -60, 90, [255, 255, 255], 0.18);
+  c.restore();
+  c.fillStyle = '#8a6420'; c.beginPath(); c.arc(0, 0, 0.1, 0, TAU); c.fill(); c.restore();
+  const ta = sm(seg(s, 1.6, 2.2)); txt('定型权集中度，决定移植改造深度', 640, 70, 18, '#f9dba0', { font: KAI, ls: 4, alpha: ta, shadow: 'rgba(0,0,0,0.7)', sb: 6 });
+  cmpCard(40, 380, '检验：是否「中国例外」？', '镜中：拿破仑法典 · 明治维新的再定型', sm(seg(s, 1.0, 1.6)) * (1 - sm(seg(s, 4.5, 5))), 340);
+}
+
+/* ---------- 第12章 当机器不再需要人 ---------- */
+function sc12(s, t) {
+  c.fillStyle = vgrad('#040918', '#0d2c4d'); c.fillRect(0, 0, W, H);
+  // 星点
+  for (let i = 0; i < 90; i++) { c.fillStyle = `rgba(190,230,255,${0.2 + 0.5 * R(i) * (0.6 + 0.4 * Math.sin(t * 2 + i))})`; c.fillRect(R(i, 1) * W, R(i, 2) * 300, 1.5, 1.5); }
+  const gA = 1 - sm(seg(s, 3.3, 3.9)), gB = sm(seg(s, 3.4, 4.0));
+  const ga = c.globalAlpha;
+  // —— A 三条依赖纽带 ——
+  if (gA > 0.01) {
+    c.globalAlpha = ga * gA;
+    const cx = 640, cy = 120, snaps = EV.snap, snapped = snaps.map(t0 => t > t0);
+    const live = 1 - (snapped.filter(Boolean).length) / 3;
+    glow(cx, cy, 160, [255, 200, 90], 0.15 + 0.5 * live);
+    // 王座 / 权力
+    c.fillStyle = '#0a0f1c'; c.fillRect(cx - 40, cy - 40, 80, 80); c.strokeStyle = rgba(GOLD, 0.5 + 0.5 * live); c.lineWidth = 2; c.strokeRect(cx - 40, cy - 40, 80, 80); txt('权', cx, cy, 52, rgba(GOLD, 0.45 + 0.55 * live), { font: KAI, weight: 'bold' });
+    const lanes = [{ x: 260, n: '生产', i: 0 }, { x: 640, n: '财政', i: 1 }, { x: 1020, n: '兵源', i: 2 }];
+    lanes.forEach(L => {
+      const t0 = snaps[L.i], broken = t > t0, bt = broken ? t - t0 : 0;
+      const col = broken ? [120, 140, 170] : [255, 210, 110];
+      // 纽带
+      for (let strand = 0; strand < 3; strand++) {
+        c.beginPath(); const ph = strand * 2.1;
+        const endY = broken ? 410 - bt * 180 * (1 + strand * 0.2) : 410;
+        const topY = cy + 40 + (broken ? bt * 220 * (0.6 + strand * 0.25) : 0);
+        for (let k = 0; k <= 30; k++) { const u = k / 30, y = lerp(topY, endY, u), amp = broken ? 14 * (1 - u) : (4 + (t < t0 ? (seg(t, t0 - 0.9, t0)) * 10 : 0)), x = lerp(cx, L.x, u) + Math.sin(u * 12 + t * 7 + ph) * amp * Math.sin(u * Math.PI) + (strand - 1) * 4;
+          k ? c.lineTo(x, y) : c.moveTo(x, y); }
+        c.strokeStyle = rgba(col, broken ? Math.max(0, 0.7 - bt * 0.5) : 0.85); c.lineWidth = 3 - strand * 0.5; c.stroke();
+      }
+      if (!broken) { c.save(); c.globalCompositeOperation = 'lighter'; for (let k = 0; k < 5; k++) { const u = ((t * 0.5 + k / 5) % 1), y = lerp(cy + 40, 410, u), x = lerp(cx, L.x, u); glow(x, y, 9, [255, 220, 130], 0.9); } c.restore(); }
+      if (broken && bt < 0.5) { c.save(); c.globalCompositeOperation = 'lighter'; glow(lerp(cx, L.x, 0.5), 260, 160 * (1 - bt * 2), [255, 240, 200], 0.9); c.restore(); for (let k = 0; k < 14; k++) { const a = R(k + L.i * 20) * TAU, sp = 120 * R(k, 5); c.fillStyle = `rgba(255,230,160,${1 - bt * 2})`; c.fillRect(lerp(cx, L.x, 0.5) + Math.cos(a) * sp * bt * 2, 260 + Math.sin(a) * sp * bt * 2, 2.5, 2.5); } }
+      // 下方群像
+      c.fillStyle = 'rgba(8,14,28,0.9)'; c.fillRect(L.x - 120, 410, 240, 100);
+      for (let k = 0; k < 7; k++) person(L.x - 90 + k * 30, 500, 46 + R(k + L.i * 9) * 8, broken ? '#4a6a8c' : '#c9a458', { aL: broken ? 1.4 : 1.9, aR: broken ? 1.7 : 1.2 });
+      // 图标
+      c.save(); c.translate(L.x, 375); c.strokeStyle = rgba(broken ? [130, 160, 190] : GOLD, 0.9); c.lineWidth = 2.4; c.fillStyle = 'rgba(0,0,0,0)';
+      if (L.i === 0) { gear(0, 0, 18, 8, t * (broken ? 0.3 : 2), broken ? ['#52667f', '#243445'] : ['#e0b25a', '#6b4a1a'], ''); }
+      else if (L.i === 1) { c.beginPath(); c.arc(0, 0, 18, 0, TAU); c.stroke(); c.strokeRect(-6, -6, 12, 12); }
+      else { c.beginPath(); c.moveTo(0, -24); c.lineTo(0, 22); c.moveTo(-10, -14); c.lineTo(10, -14); c.moveTo(-10, -24); c.lineTo(10, -24); c.stroke(); }
+      c.restore();
+      txt(L.n, L.x, 355, 18, broken ? '#8aa4c0' : '#ffe2a2', { font: KAI, ls: 6 });
+    });
+    txt('依赖纽带松动：生产 · 财政 · 兵源', 640, 66, 18, '#bfe4ff', { font: KAI, ls: 4, alpha: sm(seg(s, 0.4, 1)) });
+  }
+  // —— B 具身机器人运动会 ——
+  if (gB > 0.01) {
+    c.globalAlpha = ga * gB;
+    // 数据中心剪影
+    for (let k = 0; k < 9; k++) { const x = 60 + k * 140, h = 70 + (k % 4) * 26; c.fillStyle = '#071326'; c.fillRect(x, 330 - h, 90, h); for (let l = 0; l < h / 10; l++) for (let m = 0; m < 6; m++) { const on = Math.sin(t * 3 + k * 3 + l * 1.7 + m) > 0.2; c.fillStyle = on ? 'rgba(90,230,255,0.85)' : 'rgba(20,50,70,0.8)'; c.fillRect(x + 6 + m * 14, 330 - h + 6 + l * 10, 8, 4); } }
+    // 看台与人群
+    c.fillStyle = '#0b1830'; c.fillRect(0, 352, W, 56);
+    for (let k = 0; k < 96; k++) { const x = 8 + k * 13.3, y = 366 + (k % 3) * 12, jump = Math.abs(Math.sin(t * 5 + k)) * 5 * pulse(t, 0.4); c.fillStyle = `rgba(${200 + R(k) * 55 | 0},${120 + R(k, 1) * 100 | 0},${80 + R(k, 2) * 60 | 0},0.9)`; c.beginPath(); c.arc(x, y - jump, 3.5, 0, TAU); c.fill(); c.fillRect(x - 3, y - jump + 3, 6, 9); }
+    // 灯笼
+    for (let k = 0; k < 12; k++) { const x = 60 + k * 106, y = 150 + 10 * Math.sin(t * 1.4 + k); c.strokeStyle = 'rgba(230,200,140,0.5)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, y - 18); c.stroke(); glow(x, y, 40, [255, 80, 50], 0.5); c.fillStyle = '#c4281e'; c.beginPath(); c.ellipse(x, y, 13, 17, 0, 0, TAU); c.fill(); c.fillStyle = '#e8b64a'; c.fillRect(x - 6, y - 19, 12, 3); c.fillRect(x - 6, y + 16, 12, 3); }
+    // 跑道与机器人
+    c.fillStyle = '#17304f'; c.fillRect(0, 408, W, 76); c.strokeStyle = 'rgba(255,255,255,0.35)'; c.lineWidth = 2; for (let l = 0; l < 3; l++) { c.beginPath(); c.moveTo(0, 424 + l * 20); c.lineTo(W, 424 + l * 20); c.stroke(); }
+    const run = Math.max(0, t - EV.robots + 0.6);
+    for (let r = 0; r < 6; r++) {
+      const lane = r % 3, x = lerp(-80, W + 80, ((run * (0.14 + r * 0.012) + r * 0.1) % 1)), y = 428 + lane * 20, ph = t * 12 + r, hs = 62;
+      if (x < -60 || x > W + 60) continue; c.save(); c.translate(x, y);
+      glow(0, -32, 55, [90, 220, 235], 0.25);
+      c.strokeStyle = '#d6edf7'; c.lineWidth = 5; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(0, -hs * 0.45); c.lineTo(Math.sin(ph) * 14, -hs * 0.2); c.lineTo(Math.sin(ph) * 22 - 4, 0); c.stroke();
+      c.beginPath(); c.moveTo(0, -hs * 0.45); c.lineTo(Math.sin(ph + Math.PI) * 14, -hs * 0.2); c.lineTo(Math.sin(ph + Math.PI) * 22 - 4, 0); c.stroke();
+      c.fillStyle = r % 2 ? '#d5382a' : '#e7c14d'; c.fillRect(-9, -hs * 0.95, 18, hs * 0.5); c.fillStyle = '#e6f5fb'; c.fillRect(-7, -hs * 1.2, 14, 14); c.fillStyle = 'rgba(90,220,235,0.95)'; c.fillRect(-4, -hs * 1.12, 8, 3);
+      c.strokeStyle = '#d6edf7'; c.lineWidth = 4; c.beginPath(); c.moveTo(-9, -hs * 0.9); c.lineTo(-9 + Math.sin(ph + Math.PI) * 14, -hs * 0.65); c.moveTo(9, -hs * 0.9); c.lineTo(9 + Math.sin(ph) * 14, -hs * 0.65); c.stroke();
+      c.restore();
+    }
+    // 横幅
+    c.save(); c.translate(640, 88); c.fillStyle = 'rgba(180,30,24,0.95)'; c.fillRect(-250, -26, 500, 52); c.strokeStyle = rgba(GOLD, 0.95); c.lineWidth = 2; c.strokeRect(-246, -22, 492, 44); txt('具 身 机 器 人 运 动 会', 0, 1, 30, '#ffe7b0', { font: KAI, weight: 'bold', ls: 8 }); c.restore();
+    c.save(); c.globalCompositeOperation = 'lighter'; for (let k = 0; k < 40; k++) { const a = (t * 0.4 + k / 40) * TAU, rx = 140, ry = 28; glow(640 + Math.cos(a) * rx * 3.6, 185 + Math.sin(a) * ry, 7, [120, 240, 255], 0.9); } c.restore();
+  }
+  c.globalAlpha = ga;
+  cmpCard(40, 150, '中：开源权重路线 · 应用普及', '美：私人AI投资 · 头部IPO竞速', sm(seg(s, 4.4, 5)) * (1 - sm(seg(s, 6.5, 7))), 340);
+}
+/* ===== 分镜 · 第13章、第15章、第16章 ===== */
+function bez(p0, p1, p2, p3, u) {
+  const v = 1 - u; return [v * v * v * p0[0] + 3 * v * v * u * p1[0] + 3 * v * u * u * p2[0] + u * u * u * p3[0], v * v * v * p0[1] + 3 * v * v * u * p1[1] + 3 * v * u * u * p2[1] + u * u * u * p3[1]];
+}
+function route(p0, p1, p2, p3, f, col, w) {
+  c.save(); c.lineCap = 'round'; c.beginPath(); for (let k = 0; k <= 40; k++) { const p = bez(p0, p1, p2, p3, f * k / 40); k ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); }
+  c.strokeStyle = rgba(col, 0.28); c.lineWidth = w + 6; c.stroke(); c.strokeStyle = rgba(col, 0.95); c.lineWidth = w; c.stroke(); c.restore();
+}
+function boat(x, y, ang, col) {
+  c.save(); c.translate(x, y); c.rotate(ang); c.fillStyle = rgba(col, 1); c.beginPath(); c.moveTo(-12, 0); c.lineTo(12, 0); c.lineTo(8, 6); c.lineTo(-9, 6); c.closePath(); c.fill();
+  c.fillStyle = rgba(mix(col, [255, 255, 255], 0.5), 0.95); c.beginPath(); c.moveTo(0, -1); c.lineTo(0, -16); c.lineTo(9, -2); c.closePath(); c.fill(); c.restore();
+}
+
+/* ---------- 第13章 两条百年航线 ---------- */
+function sc13(s, t) {
+  c.fillStyle = vgrad('#03081a', '#0a2748'); c.fillRect(0, 0, W, H);
+  c.strokeStyle = 'rgba(100,170,230,0.07)'; c.lineWidth = 1; for (let x = 0; x < W; x += 40) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); } for (let y = 0; y < H; y += 40) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+  for (let k = 0; k < 10; k++) { c.strokeStyle = 'rgba(120,190,240,0.09)'; c.beginPath(); for (let x = 0; x <= W; x += 14) { const y = 120 + k * 40 + Math.sin(x * 0.02 + t * 0.9 + k) * 5; x ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); }
+  const S0 = [80, 300], F = [420, 300], BU = [[560, 300], [640, 160], [740, 160]], RD = [[560, 300], [640, 440], [740, 440]];
+  const blue = [90, 160, 255], red = [255, 90, 70], gold = [255, 214, 120];
+  const pre = eo(seg(s, 0.1, 1.9)), post = eo(seg(s, 2.2, 3.8));
+  c.save(); c.globalCompositeOperation = 'lighter'; route(S0, [200, 280], [320, 320], F, pre, gold, 4);
+  if (t > EV.fork) { route(F, BU[0], BU[1], BU[2], post, blue, 3.4); route(F, RD[0], RD[1], RD[2], post, red, 3.4); } c.restore();
+  // 0.363 转折点
+  const fk = sm(seg(t, EV.fork - 0.15, EV.fork + 0.3)); if (fk > 0) {
+    c.save(); c.globalAlpha *= fk; c.setLineDash([5, 6]); c.strokeStyle = rgba(gold, 0.8); c.lineWidth = 1.5; c.beginPath(); c.moveTo(F[0], 110); c.lineTo(F[0], 500); c.stroke(); c.setLineDash([]);
+    glow(F[0], F[1], 80 + 60 * Math.exp(-(t - EV.fork) * 3), gold, 0.7); txt('依赖度 0.363', F[0], 96, 20, '#ffe4a0', { font: KAI, ls: 3, shadow: 'rgba(255,200,90,0.7)', sb: 10 }); txt('条件性转折点', F[0], 122, 13, '#bcd8f0', { font: KAI }); c.restore(); }
+  // 舟行
+  if (pre > 0.05) for (let k = 0; k < 3; k++) { const u = ((t * 0.12 + k / 3) % 1) * pre; const p = bez(S0, [200, 280], [320, 320], F, u); boat(p[0], p[1] - 8 + Math.sin(t * 3 + k) * 2, 0, gold); }
+  if (t > EV.fork) for (let k = 0; k < 3; k++) { const u = (((t - EV.fork) * 0.16 + k / 3) % 1) * post; const pb = bez(F, BU[0], BU[1], BU[2], u), pr = bez(F, RD[0], RD[1], RD[2], u); boat(pb[0], pb[1] - 8, -0.4 * (1 - u), blue); boat(pr[0], pr[1] - 8, 0.35 * (1 - u), red); }
+  // 人群：两排
+  const rowY = [150, 420], rows = [{ y: 150, col: blue, name: '市场主导构型 · 接入权双峰分化', f: i => Math.exp(-Math.pow((i - 5) / 2.2, 2)) * 1.0 + Math.exp(-Math.pow((i - 24) / 2.2, 2)) * 0.75 },
+    { y: 420, col: red, name: '国家甄采构型 · 普惠通道', f: i => 0.35 + 0.6 * Math.exp(-Math.pow((i - 15) / 12, 2)) }];
+  const burst = EV.burst, N = 30;
+  rows.forEach((rw, ri) => {
+    const vis = sm(seg(s, 3.2, 4)); c.save(); c.globalAlpha *= vis;
+    c.beginPath(); for (let i = 0; i < N; i++) { const x = 790 + i * 15, h = rw.f(i) * (ri ? 38 : 50) * eo(seg(t, burst - 0.2, burst + 2.2)); i ? c.lineTo(x, rw.y - 20 - h) : c.moveTo(x, rw.y - 20 - h); }
+    c.strokeStyle = rgba(rw.col, 0.95); c.lineWidth = 2; c.stroke(); c.lineTo(790 + (N - 1) * 15, rw.y - 20); c.lineTo(790, rw.y - 20); c.closePath(); c.fillStyle = rgba(rw.col, 0.2); c.fill();
+    for (let i = 0; i < N; i++) { const lit = clamp(rw.f(i) * eo(seg(t, burst + i * 0.03, burst + 1.4 + i * 0.03)) * 1.2); const x = 790 + i * 15; c.fillStyle = rgba(mix([40, 60, 90], rw.col, lit), 1); c.beginPath(); c.arc(x, rw.y, 3.6, 0, TAU); c.fill(); c.fillRect(x - 3, rw.y + 3, 6, 9); if (lit > 0.4) glow(x, rw.y + 4, 14, rw.col, 0.5 * lit); }
+    txt(rw.name, 790 + N * 7.5, rw.y + 34, 14, rgba(mix(rw.col, [255, 255, 255], 0.5)), { font: KAI, ls: 2 });
+    c.restore();
+  });
+  // 红利粒子：沿航线分发
+  if (t > burst) { c.save(); c.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < 120; k++) { const age = t - burst - R(k) * 1.6; if (age < 0 || age > 1.5) continue; const u = age / 1.5; const tgt = (k % 30); const e = bez(F, RD[0], RD[1], RD[2], u); const dest = 790 + tgt * 15; const x = lerp(e[0], dest, sm(seg(u, 0.5, 1))), y = lerp(e[1], 420, sm(seg(u, 0.5, 1))); glow(x, y, 7, gold, 0.9 * (1 - u * 0.4)); }
+    for (let k = 0; k < 14; k++) { const age = t - burst - R(k, 9) * 1.2; if (age < 0 || age > 1.5) continue; const u = age / 1.5, e = bez(F, BU[0], BU[1], BU[2], u); const tgt = k % 2 ? 5 : 24; const x = lerp(e[0], 790 + tgt * 15, sm(seg(u, 0.5, 1))), y = lerp(e[1], 150, sm(seg(u, 0.5, 1))); glow(x, y, 7, gold, 0.9 * (1 - u * 0.4)); }
+    c.restore(); }
+  // 仿真平台滑杆
+  const pa = sm(seg(s, 1.0, 1.6)) * (1 - sm(seg(s, 6.4, 6.9)));
+  if (pa > 0) { c.save(); c.globalAlpha *= pa; c.fillStyle = 'rgba(4,12,28,0.75)'; c.fillRect(470, 388, 300, 62); c.strokeStyle = rgba(CYAN, 0.6); c.strokeRect(470.5, 388.5, 299, 61);
+    ['税率', '阻尼', '自动化上限'].forEach((n, i) => { const y = 402 + i * 18; txt(n, 482, y, 11, '#bfe4ff', { align: 'left', font: KAI }); c.strokeStyle = 'rgba(160,210,255,0.5)'; c.beginPath(); c.moveTo(560, y); c.lineTo(750, y); c.stroke(); const kx = 560 + 190 * (0.5 + 0.4 * Math.sin(t * 1.2 + i * 2)); c.fillStyle = rgba(CYAN, 1); c.beginPath(); c.arc(kx, y, 4.5, 0, TAU); c.fill(); });
+    c.restore(); }
+  txt('智能红利，接入权的百年航线', 640, 68, 20, '#cfe8ff', { font: KAI, ls: 5, alpha: sm(seg(s, 0.3, 0.9)) });
+  cmpCard(40, 380, '中：国家甄采构型，普惠通道，红利广泛派发', '西：市场主导构型，接入权向两端集中', sm(seg(s, 4.2, 4.8)) * (1 - sm(seg(s, 6.4, 6.9))), 380);
+}
+
+/* ---------- 第15章 甄采体制的一般理论 ---------- */
+function sc15(s, t) {
+  c.fillStyle = vgrad('#0a0710', '#221320'); c.fillRect(0, 0, W, H);
+  const cx = 640, cy = 262, Rr = 150, ring = [-Math.PI / 2, Math.PI / 6, Math.PI * 5 / 6], names = ['变异', '甄别', '复制'], cols = [[96, 200, 235], [255, 210, 110], [255, 100, 80]];
+  glow(cx, cy, 300, [255, 190, 100], 0.2 + 0.15 * pulse(t, 0.3));
+  c.strokeStyle = 'rgba(255,220,150,0.1)'; c.lineWidth = 1; for (let r = 1; r < 5; r++) { c.beginPath(); c.arc(cx, cy, Rr * 0.5 + r * 60, 0, TAU); c.stroke(); }
+  for (let i = 0; i < 3; i++) { const a0 = ring[i] + 0.35, a1 = ring[(i + 1) % 3] + (i === 2 ? TAU : 0) - 0.35; c.save(); c.lineCap = 'round'; c.strokeStyle = rgba(cols[i], 0.9); c.lineWidth = 3; c.beginPath(); c.arc(cx, cy, Rr, a0, a1 + (i === 2 ? 0 : 0)); c.stroke(); const ex = cx + Math.cos(a1) * Rr, ey = cy + Math.sin(a1) * Rr, ta = a1 + Math.PI / 2; c.fillStyle = rgba(cols[i], 1); c.beginPath(); c.moveTo(ex + Math.cos(ta) * 9, ey + Math.sin(ta) * 9); c.lineTo(ex + Math.cos(a1) * 14, ey + Math.sin(a1) * 14); c.lineTo(ex - Math.cos(ta) * 9, ey - Math.sin(ta) * 9); c.fill(); c.restore(); }
+  // 节点
+  names.forEach((n, i) => { const a = sm(seg(s, 0.15 + i * 0.2, 0.7 + i * 0.2)); const x = cx + Math.cos(ring[i]) * Rr, y = cy + Math.sin(ring[i]) * Rr; c.save(); c.globalAlpha *= a; glow(x, y, 70, cols[i], 0.45); c.fillStyle = 'rgba(8,6,12,0.88)'; c.beginPath(); c.arc(x, y, 38, 0, TAU); c.fill(); c.strokeStyle = rgba(cols[i], 1); c.lineWidth = 2.5; c.stroke(); txt(n, x, y + 1, 28, rgba(mix(cols[i], [255, 255, 255], 0.5)), { font: KAI, weight: 'bold' }); c.restore(); });
+  // 循环中的“制度候选体”
+  const shape = (k, x, y, r, col, a) => { c.fillStyle = rgba(col, a); c.beginPath(); const m = [0, 3, 4, 4, 5, 6][k % 6]; if (!m) c.arc(x, y, r, 0, TAU); else for (let q = 0; q < m; q++) { const an = q / m * TAU + (k === 3 ? Math.PI / 4 : -Math.PI / 2); q ? c.lineTo(x + Math.cos(an) * r, y + Math.sin(an) * r) : c.moveTo(x + Math.cos(an) * r, y + Math.sin(an) * r); } c.closePath(); c.fill(); };
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 12; k++) {
+    const u = ((t * 0.22 + k / 12) % 1), seg3 = Math.floor(u * 3), local = u * 3 - seg3, ang = ring[0] + u * TAU * 0.999 + 0.0;
+    const surv = k % 3 === 0; if (seg3 === 1 && !surv) { if (local > 0.5) continue; }
+    const jitter = seg3 === 0 ? (R(k) - 0.5) * 36 * (1 - local) : 0, rad = Rr + jitter + (seg3 === 2 && k % 2 ? 10 : 0);
+    const x = cx + Math.cos(ang) * rad, y = cy + Math.sin(ang) * rad, col = seg3 === 0 ? cols[0] : seg3 === 1 ? (surv ? cols[1] : [120, 120, 130]) : cols[2];
+    const a = seg3 === 1 && !surv ? 0.8 * (1 - local * 2) : 1; shape(k, x, y, seg3 === 1 && surv ? 7 : 5, col, a); glow(x, y, 11, col, 0.5 * a);
+  }
+  c.restore();
+  txt('甄采', cx, cy - 6, 78, 'rgba(255,224,160,0.95)', { font: KAI, weight: 'bold', shadow: 'rgba(255,170,60,0.8)', sb: 18 }); txt('一般理论', cx, cy + 50, 17, '#e8cf9a', { font: KAI, ls: 6 });
+  // 四项判据 · 边界案例
+  const ca = sm(seg(s, 1.4, 2.0));
+  [['诱致与强制', 150, 156], ['中间扩散', 150, 226], ['分级试验', 1040, 156], ['两个退化极限', 1040, 226]].forEach(([n, x, y], i) => { c.save(); c.globalAlpha *= ca; c.strokeStyle = rgba(GOLD, 0.6); c.fillStyle = 'rgba(10,8,12,0.7)'; c.fillRect(x - 90, y - 24, 180, 48); c.strokeRect(x - 90.5, y - 24.5, 181, 49); txt(n, x, y, 18, '#f1d9a4', { font: KAI, ls: 3 }); c.restore(); });
+  txt('四项可观察判据 · 四项区分性预测', 640, 78, 19, '#e8cf9a', { font: KAI, ls: 5, alpha: ca });
+  const ba = sm(seg(s, 2.8, 3.4)); [['苏联指令经济', 250], ['印度联邦试验', 640], ['拉美移植困境', 1030]].forEach(([n, x], i) => { c.save(); c.globalAlpha *= ba; const y = 432; c.strokeStyle = 'rgba(200,190,210,0.55)'; c.setLineDash([3, 4]); c.beginPath(); c.arc(x, y, 17, 0, TAU); c.stroke(); c.setLineDash([]); glow(x, y, 26, [180, 170, 200], 0.25); txt(n, x, y + 32, 14, '#c8c0d6', { font: KAI, ls: 2 }); c.restore(); });
+  cmpCard(40, 380, '边界案例检验判据区分力', '三者均偏离「诱致·选择·复制」闭环', sm(seg(s, 3.0, 3.6)) * 0, 330);
+}
+
+/* ---------- 第16章 中国之所以为中国 ---------- */
+function sc16(s, t) {
+  c.fillStyle = vgrad('#2a0b0a', '#d98a34'); c.fillRect(0, 0, W, H);
+  const rise = eo(seg(s, 0, 2.2)); const sx = 640, sy = lerp(520, 300, rise); glow(sx, sy, 520, [255, 220, 130], 0.7); c.fillStyle = 'rgba(255,236,190,0.95)'; c.beginPath(); c.arc(sx, sy, 100, 0, TAU); c.fill();
+  c.save(); c.globalCompositeOperation = 'lighter'; for (let k = 0; k < 24; k++) { const a = k / 24 * TAU + t * 0.08; c.strokeStyle = 'rgba(255,220,150,0.1)'; c.lineWidth = 14; c.beginPath(); c.moveTo(sx + Math.cos(a) * 110, sy + Math.sin(a) * 110); c.lineTo(sx + Math.cos(a) * 700, sy + Math.sin(a) * 700); c.stroke(); } c.restore();
+  mount(430, 90, 11, 'rgba(60,20,10,0.55)', 0, 0.005); mount(470, 70, 12, 'rgba(30,10,6,0.85)', 0, 0.006);
+  const dx = 640, dy = 440;
+  // 轨道上的意象
+  ['卜', '简', '版', '印', '机'].forEach((g, i) => { const a = t * 0.5 + i * TAU / 5, x = dx + Math.cos(a) * 400, y = 335 + Math.sin(a) * 45; c.save(); c.globalAlpha *= 0.85 * sm(seg(s, 1.0, 1.6)); c.fillStyle = 'rgba(20,8,6,0.7)'; c.beginPath(); c.arc(x, y, 22, 0, TAU); c.fill(); c.strokeStyle = rgba(GOLD, 0.9); c.lineWidth = 1.5; c.stroke(); txt(g, x, y + 1, 24, '#ffe3a0', { font: KAI, weight: 'bold' }); c.restore(); });
+  // 鼎
+    c.save(); c.translate(dx, dy); const sc = 1.1; c.scale(sc, sc);
+  const bg = c.createLinearGradient(-120, 0, 120, 0); bg.addColorStop(0, '#3a2810'); bg.addColorStop(0.5 + 0.2 * Math.sin(t), '#f0cb70'); bg.addColorStop(1, '#3a2810');
+  c.fillStyle = bg; c.strokeStyle = '#1c1206'; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(-100, -90); c.quadraticCurveTo(-125, -20, -80, 24); c.lineTo(80, 24); c.quadraticCurveTo(125, -20, 100, -90); c.closePath(); c.fill(); c.stroke();
+  c.beginPath(); c.ellipse(0, -90, 100, 12, 0, 0, TAU); c.fillStyle = '#2a1c0a'; c.fill(); c.stroke();
+  [-110, 100].forEach(x => { c.fillStyle = bg; c.fillRect(x, -130, 10, 46); c.strokeRect(x, -130, 10, 46); c.fillRect(x - 6, -134, 22, 8); });
+  [[-70, '准据'], [0, '容量'], [70, '通道']].forEach(([x, n], i) => { c.fillStyle = bg; c.beginPath(); c.moveTo(x - 14, 22); c.lineTo(x + 14, 22); c.lineTo(x + 10, 80); c.lineTo(x - 10, 80); c.closePath(); c.fill(); c.stroke(); });
+  c.save(); c.beginPath(); c.moveTo(-100, -90); c.quadraticCurveTo(-125, -20, -80, 24); c.lineTo(80, 24); c.quadraticCurveTo(125, -20, 100, -90); c.clip(); meander(-110, -56, 220, 18, [50, 30, 8], 0.8); c.restore();
+  c.restore();
+  // 三参数
+  [[-70, '准据', 0.0, [255, 120, 80]], [0, '容量', 0.3, [255, 230, 130]], [70, '通道', 0.6, [120, 230, 200]]].forEach(([x, n, d, col]) => {
+    const a = sm(seg(s, 0.6 + d, 1.2 + d)), px = dx + x * 1.25 * 2.1 * 0.6 * 1, tx = [350, 640, 930][[-70, 0, 70].indexOf(x)];
+    c.save(); c.globalAlpha *= a; c.globalCompositeOperation = 'lighter'; c.strokeStyle = rgba(col, 0.45); c.lineWidth = 3; c.beginPath(); c.moveTo(dx + x * 1.1, dy + 80 * 1.1 - 20); c.lineTo(tx, 215); c.stroke(); glow(tx, 205, 80, col, 0.55); c.restore();
+    c.save(); c.globalAlpha *= a; txt(n, tx, 205, 42, rgba(mix(col, [255, 255, 255], 0.55)), { font: KAI, weight: 'bold', shadow: 'rgba(0,0,0,0.7)', sb: 10 }); c.restore();
+  });
+  const ta = sm(seg(s, 1.4, 2.2)); txt('甄采体制', 640, 92, 58, '#fff1c8', { font: KAI, weight: 'bold', alpha: ta, shadow: 'rgba(80,20,0,0.8)', sb: 14, ls: 20 });
+  txt('中国三千年制度变迁的生成机制 · 智能时代的第四次大分流', 640, 140, 16, '#ffe3b0', { font: KAI, ls: 4, alpha: ta });
+  seal(640 + 330, 96, '甄采', 38, CIN, ta);
+}
+/* ===== 总装：场景调度、字幕、编年轴、中西对比曲线、调色与主循环 ===== */
+const SCENES = [
+  { a: 0, fn: scPrologue }, { a: 3, fn: sc7 }, { a: 10, fn: sc8 }, { a: 18, fn: sc9 }, { a: 25, fn: sc10 },
+  { a: 32, fn: sc11 }, { a: 37, fn: sc12 }, { a: 44, fn: sc13 }, { a: 51, fn: sc15 }, { a: 56, fn: sc16 },
+];
+const CHAPTERS = [
+  [3.3, 10, '第七章', '采诗官与贞人的黄昏'], [10.3, 18, '第八章', '印刷机前的中国式扩容'], [18.3, 25, '第九章', '精准的保守主义'],
+  [25.3, 32, '第十章', '同一台机器的两次换挡'], [32.3, 37, '第十一章', '欧洲这面镜子'], [37.3, 44, '第十二章', '当机器不再需要人'],
+  [44.3, 51, '第十三章', '两条百年航线'], [51.3, 56, '第十五章', '甄采体制的一般理论'], [56.3, 59.6, '第十六章', '中国之所以为中国'],
+];
+const SUBS = [
+  [3.1, 5.7, '公元前1046年 · 殷墟贞人垄断通天，占卜即行政'], [5.7, 8.1, '周人以德配天：采诗官摇铎，民声入庙堂'], [8.1, 10.0, '利簋、大盂鼎铭文：慢变量由此起步'],
+  [10.2, 13.3, '唐宋之变：冯道刻九经，雕版把知识变成公共品'], [13.4, 15.3, '占城稻抬升农业剩余，养得起天下读书人'], [15.3, 18.0, '科举放榜，学而优则仕 · 宋刻本早于古登堡数百年'],
+  [18.1, 20.3, '近代古今之变：一口通商，封禁诏书落下'], [20.3, 22.6, '锁链横江，航道愈窄 · 精准保守'], [22.6, 25.0, '蒸汽点火、工厂成势：第三次大分流，中国落后'],
+  [25.1, 27.9, '同一台机器，两次准据换挡：1949、1978'], [27.95, 30.0, '小岗村红手印：试点授权，容错默许'], [30.0, 32.0, '复制推广，星火成势：准据换挡，追赶并超越'],
+  [32.1, 34.8, '欧洲这面镜子：六种政体构型，破「中国例外论」'], [34.8, 37.0, '拿破仑法典、明治维新：定型权集中度决定移植深度'],
+  [37.1, 39.0, '智能之变：打破垄断者，必须争取民众'], [39.0, 41.3, '依赖纽带松动：生产、财政、兵源，同时失去必要性'], [41.4, 44.0, '2026年7月：具身机器人运动会，依赖归零的社会已在眼前'],
+  [44.1, 46.3, '两条百年航线：智能红利分往何处'], [46.3, 48.0, '依赖度0.363：条件性转折，接入权双峰分化'], [48.0, 51.0, '国家甄采构型：普惠通道，红利派发给全社会公众'],
+  [51.1, 53.6, '变异、甄别、复制：三个子机制，一个循环'], [53.6, 56.0, '四项判据，两个退化极限：边界案例检验区分力'],
+  [56.1, 58.3, '准据、容量、通道：文明底色的可计算表达'], [58.3, 59.8, '中国之所以为中国：三千年，一以贯之'],
+];
+const ERAS = [[3, 10, '上古周秦', '陶埙'], [10, 18, '中古唐宋', '古琴'], [18, 25, '近代古今', '琵琶'], [25, 37, '当代追赶', '民乐交响'], [37, 56, '智能时代', '民乐交响']];
+const YEARS = [[3, 10, -1046, -221], [10, 18, 932, 1127], [18, 25, 1757, 1840], [25, 32, 1949, 1995], [32, 37, 1804, 1868], [37, 44, 2026, 2026], [44, 51, 2026, 2126]];
+const modK = [[0, 0], [18, 0.15], [25, 0.45], [32, 0.65], [37, 0.85], [44, 1], [60, 1]];
+const modAt = t => { for (let i = 1; i < modK.length; i++) if (t <= modK[i][0]) return lerp(modK[i - 1][1], modK[i][1], seg(t, modK[i - 1][0], modK[i][0])); return 1; };
+// 中西「社会形态变革」示意曲线（非统计，叙事性定性刻画）
+const CN = [[3, .28], [7, .5], [10, .58], [14, .8], [18, .86], [21, .74], [24, .52], [27, .48], [32, .66], [37, .84], [44, .96], [56, .98]];
+const WS = [[3, .22], [7, .22], [10, .24], [14, .3], [18, .38], [21, .62], [24, .9], [28, .93], [37, .92], [44, .94], [56, .95]];
+const curveAt = (K, t) => { if (t <= K[0][0]) return K[0][1]; for (let i = 1; i < K.length; i++) if (t <= K[i][0]) return lerp(K[i - 1][1], K[i][1], sm(seg(t, K[i - 1][0], K[i][0]))); return K[K.length - 1][1]; };
+
+// 胶片颗粒
+const GR = []; for (let k = 0; k < 3; k++) { const g = document.createElement('canvas'); g.width = g.height = 256; const gx = g.getContext('2d'), im = gx.createImageData(256, 256); for (let i = 0; i < im.data.length; i += 4) { const v = Math.random() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; } gx.putImageData(im, 0, 0); GR.push(g); }
+
+function fmtYear(y) { y = Math.round(y); return y < 0 ? `公元前 ${-y}` : `公元 ${y}`; }
+function drawChrome(t, md) {
+  const fadeIO = sm(seg(t, 0.2, 0.9)) * (1 - sm(seg(t, 59.4, 59.95)));
+  c.save(); c.globalAlpha = fadeIO;
+  // 字幕底带
+  const gb = c.createLinearGradient(0, 440, 0, H); gb.addColorStop(0, 'rgba(0,0,0,0)'); gb.addColorStop(1, 'rgba(0,0,0,0.78)'); c.fillStyle = gb; c.fillRect(0, 440, W, H - 440);
+  // 编年轴
+  const X0 = 120, X1 = 1160, ty = 528, px = X0 + (X1 - X0) * t / DUR;
+  c.strokeStyle = 'rgba(230,200,140,0.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(X0, ty); c.lineTo(X1, ty); c.stroke();
+  c.strokeStyle = rgba(GOLD, 0.95); c.lineWidth = 2; c.beginPath(); c.moveTo(X0, ty); c.lineTo(px, ty); c.stroke();
+  ERAS.forEach(([a, b, n, inst]) => { const xa = X0 + (X1 - X0) * a / DUR, xb = X0 + (X1 - X0) * b / DUR, on = t >= a && t < b; c.fillStyle = on ? rgba(GOLD, 1) : 'rgba(230,200,140,0.45)'; c.fillRect(xa, ty - 4, 1.5, 8); txt(n, (xa + xb) / 2, ty - 10, 11, on ? '#ffe3a0' : 'rgba(230,200,140,0.55)', { font: KAI, ls: 2 }); txt('♪ ' + inst, (xa + xb) / 2, ty + 11, 9.5, on ? '#ffd48a' : 'rgba(230,200,140,0.4)', { font: KAI }); });
+  glow(px, ty, 14, GOLD, 0.8); c.fillStyle = '#fff1c8'; c.beginPath(); c.arc(px, ty, 3.2, 0, TAU); c.fill();
+  // 年份
+  let ytxt = '';
+  for (const [a, b, y0, y1] of YEARS) if (t >= a && t < b) { const y = lerp(y0, y1, sm(seg(t, a + 0.3, b - 0.5))); ytxt = (a === 37 ? '公元 2026 年 7 月' : fmtYear(y)); }
+  if (!ytxt && t >= 51 && t < 56) ytxt = '一般理论'; if (!ytxt && t >= 56) ytxt = '三千年';
+  if (ytxt) { txt(ytxt, 640, 30, 22, '#ffe3a0', { font: KAI, weight: 'bold', ls: 6, shadow: 'rgba(0,0,0,0.8)', sb: 8 }); c.strokeStyle = rgba(GOLD, 0.5); c.beginPath(); c.moveTo(500, 46); c.lineTo(780, 46); c.stroke(); }
+  // 中西对比曲线
+  const cx0 = 46, cy0 = 40, cw = 300, ch = 64;
+  c.fillStyle = 'rgba(0,0,0,0.45)'; c.fillRect(cx0 - 8, cy0 - 14, cw + 16, ch + 36); c.strokeStyle = 'rgba(230,200,140,0.28)'; c.strokeRect(cx0 - 8.5, cy0 - 14.5, cw + 17, ch + 37);
+  const mapx = tt => cx0 + (tt - 3) / 53 * cw, mapy = v => cy0 + ch - v * ch;
+  [[CN, [235, 70, 56]], [WS, [96, 150, 235]]].forEach(([K, col]) => { c.beginPath(); for (let tt = 3; tt <= Math.min(56, Math.max(3, t)); tt += 0.5) { const x = mapx(tt), y = mapy(curveAt(K, tt)); tt === 3 ? c.moveTo(x, y) : c.lineTo(x, y); } c.strokeStyle = rgba(col, 1); c.lineWidth = 2; c.stroke(); const tt = clamp(t, 3, 56); glow(mapx(tt), mapy(curveAt(K, tt)), 8, col, 0.9); });
+  const cv_ = curveAt(CN, clamp(t, 3, 56)), wv = curveAt(WS, clamp(t, 3, 56)); let st = '中国领先', stc = '#ff8a72'; if (t >= 20.5 && t < 27) { st = '中国落后'; stc = '#8fb4f0'; } else if (t >= 27 && t < 36.5) { st = '追赶'; stc = '#ffd48a'; } else if (t >= 36.5 && t < 44) { st = '并行 · 超越'; stc = '#ff8a72'; } else if (t >= 44) { st = '超越 · 普惠'; stc = '#ffd48a'; }
+  txt('中西社会形态变革 · 示意', cx0, cy0 + ch + 12, 10.5, 'rgba(230,200,140,0.7)', { align: 'left', font: KAI }); txt(st, cx0 + cw, cy0 + ch + 12, 12, stc, { align: 'right', font: KAI, weight: 'bold' });
+  txt('中', cx0 + cw - 4, cy0 + 2, 10, '#ff8a72', { align: 'right', font: KAI }); txt('西', cx0 + cw - 18, cy0 + 2, 10, '#8fb4f0', { align: 'right', font: KAI });
+  // 章题（竖排）
+  CHAPTERS.forEach(([a, b, n, tt]) => { const al = sm(seg(t, a, a + 0.5)) * (1 - sm(seg(t, b - 0.4, b))); if (al <= 0) return; c.save(); c.globalAlpha *= al * fadeIO;
+    seal(1226, 70, n.slice(1, -1), 34, CIN); txt(n, 1226, 106, 12, '#ffd8a0', { font: KAI }); vtxt(tt, 1226, 130, 24, '#fbe7b8', { font: KAI, weight: 'bold', shadow: 'rgba(0,0,0,0.85)', sb: 8, sp: 1.2 }); c.restore(); });
+  // 字幕
+  SUBS.forEach(([a, b, s]) => { const al = sm(seg(t, a, a + 0.25)) * (1 - sm(seg(t, b - 0.25, b))); if (al <= 0) return; const rise = (1 - sm(seg(t, a, a + 0.35))) * 8;
+    c.save(); c.globalAlpha *= al; txt(s, 640, 493 + rise, 25, '#fff6dc', { font: KAI, weight: 'bold', ls: 3, stroke: 'rgba(10,6,4,0.85)', sw: 5, shadow: 'rgba(0,0,0,0.9)', sb: 8 }); c.restore(); });
+  c.restore();
+  // 边框
+  c.save(); c.globalAlpha = 0.5 * fadeIO; c.strokeStyle = rgba(GOLD, 0.8); c.lineWidth = 1.5; c.strokeRect(8, 8, W - 16, H - 16); c.lineWidth = 0.7; c.strokeRect(13, 13, W - 26, H - 26);
+  [[8, 8, 1, 1], [W - 8, 8, -1, 1], [8, H - 8, 1, -1], [W - 8, H - 8, -1, -1]].forEach(([x, y, sx, sy]) => { c.beginPath(); c.moveTo(x + sx * 4, y + sy * 26); c.lineTo(x + sx * 4, y + sy * 4); c.lineTo(x + sx * 26, y + sy * 4); c.stroke(); }); c.restore();
+}
+
+function render(t) {
+  c.setTransform(2, 0, 0, 2, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+  const md = modAt(t);
+  for (let i = 0; i < SCENES.length; i++) {
+    const sc = SCENES[i], nx = SCENES[i + 1] ? SCENES[i + 1].a : DUR + 1;
+    if (t < sc.a || t >= nx + 0.7) continue;
+    const s = t - sc.a, p = clamp(s / ((nx > DUR ? DUR : nx) - sc.a)), a = i === 0 ? 1 : sm(seg(t, sc.a, sc.a + 0.6));
+    c.save(); c.globalAlpha = a;
+    const k = 1 + 0.045 * p, dx = (i % 2 ? -1 : 1) * 14 * p; c.translate(W / 2 + dx, H / 2); c.scale(k, k); c.translate(-W / 2, -H / 2);
+    sc.fn(s, t);
+    c.restore();
+  }
+  // 调色：历史段偏赭褐，当代段转为明亮朱金
+  c.save(); c.globalCompositeOperation = 'multiply'; c.fillStyle = `rgba(150,110,60,${0.22 * (1 - md)})`; c.fillRect(0, 0, W, H); c.restore();
+  c.save(); c.globalCompositeOperation = 'lighter'; const pu = pulse(t, 0.18, 0.8); if (pu > 0.05) { c.fillStyle = `rgba(255,220,160,${0.05 * pu * (0.4 + md)})`; c.fillRect(0, 0, W, H); } c.restore();
+  // 暗角
+  const vg = c.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, W * 0.62); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(0,0,0,${0.7 - 0.25 * md})`); c.fillStyle = vg; c.fillRect(0, 0, W, H);
+  // 颗粒与划痕（历史段强，当代段弱）
+  const gi = ((Math.floor(t * 14) % 3) + 3) % 3; c.save(); c.globalCompositeOperation = 'overlay'; c.globalAlpha = 0.16 * (1 - md * 0.7); const ox = (Math.floor(t * 14) * 53) % 256; for (let x = -ox; x < W; x += 256) for (let y = 0; y < H; y += 256) c.drawImage(GR[gi], x, y); c.restore();
+  if (md < 0.6) { c.save(); c.strokeStyle = `rgba(255,240,210,${0.18 * (1 - md)})`; c.lineWidth = 1; const fr = Math.floor(t * 12); for (let k = 0; k < 2; k++) { if (hash(fr * 3 + k) > 0.6) { const x = hash(fr + k * 9) * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (hash(fr + 5) - 0.5) * 6, H); c.stroke(); } } c.restore(); }
+  drawChrome(t, md);
+  // 首尾淡入淡出（循环衔接）
+  const fo = 1 - sm(seg(t, 0, 0.5)) * 0, fade = Math.max(sm(seg(t, 59.45, 60)), 1 - sm(seg(t, 0, 0.35)));
+  if (fade > 0) { c.fillStyle = `rgba(0,0,0,${fade})`; c.fillRect(0, 0, W, H); }
+}
+
+/* ===== 主循环：requestAnimationFrame 时间戳驱动，非帧计数 ===== */
+const qs = new URLSearchParams(location.search), FREEZE = qs.has('t') ? parseFloat(qs.get('t')) : null;
+let T0 = null, lastTs = 0, started = false;
+function frame(ts) {
+  lastTs = ts; if (T0 === null) T0 = ts;
+  const T = Math.max(0, (ts - T0) / 1000), t = FREEZE !== null ? FREEZE : T % DUR;
+  try { if (started) audioTick(T); render(t); } catch (err) { console.error(err); }
+  requestAnimationFrame(frame);
+}
+function begin() {
+  if (started) return; started = true; startAudio(); T0 = performance.now(); sInit = false;
+  document.getElementById('gate').style.display = 'none';
+}
+document.getElementById('gate').addEventListener('click', begin);
+addEventListener('keydown', e => {
+  if (e.key === 'm' || e.key === 'M') { setMuted(!muted); }
+  else if (e.key === 'f' || e.key === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => { }); }
+  else if (!started && (e.key === ' ' || e.key === 'Enter')) begin();
+});
+cv.addEventListener('dblclick', () => { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => { }); });
+window.__render = render;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
